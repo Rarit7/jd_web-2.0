@@ -178,6 +178,7 @@ flower_db.db
 flower
 log.txt
 config.py
+config.py.backup
 Selenium-Chrome-HTTP-Private-Proxy.zip
 
 nohup.out

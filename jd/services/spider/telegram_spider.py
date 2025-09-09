@@ -13,21 +13,36 @@ from telethon.tl.functions.contacts import GetContactsRequest, DeleteContactsReq
 from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest, GetFullChatRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import ChatInviteAlready, ChatInvite, Channel, Chat, Message, ChannelParticipantsSearch, \
-    ChannelForbidden, InputMessagesFilterPhotos, ChannelParticipantsRecent, User, DocumentAttributeFilename
+    ChannelForbidden, ChannelParticipantsRecent, User
 
 from jd import app
+from .tg_download import TelegramDownloadManager
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramSpider:
+    """
+    Telegram网页爬虫类，用于从t.me链接获取频道/群组的公开信息
+    通过解析HTML页面获取头像、用户名、描述等基本信息
+    """
 
     def __init__(self):
+        """
+        初始化爬虫实例
+        设置请求的基本参数
+        """
         self._url = ''
         self._headers = {}
         self._proxies = None
 
     def _send_request(self):
+        """
+        发送HTTP GET请求到指定URL
+        
+        Returns:
+            dict: 解析后的页面数据，失败时返回空字典
+        """
         try:
             r = requests.get(self._url, headers=self._headers, proxies=self._proxies, timeout=10)
             html = r.text
@@ -40,6 +55,15 @@ class TelegramSpider:
         return {}
 
     def _parse_result(self, html):
+        """
+        解析HTML页面，提取Telegram频道/群组信息
+        
+        Args:
+            html (str): HTML页面内容
+            
+        Returns:
+            dict: 包含photo_url, account, username, desc的字典
+        """
         soup = BeautifulSoup(html, 'html.parser')
         data = {
             'photo_url': self._get_div_text(soup, 'tgme_page_photo'),
@@ -50,6 +74,16 @@ class TelegramSpider:
         return data
 
     def _get_div_text(self, soup, class_name):
+        """
+        根据CSS类名提取指定div的文本内容
+        
+        Args:
+            soup (BeautifulSoup): BeautifulSoup解析对象
+            class_name (str): CSS类名
+            
+        Returns:
+            str: 提取的文本内容，图片类返回src属性，其他返回文本
+        """
         div = soup.find_all(class_=class_name, limit=1)
         text = ''
         if div:
@@ -60,6 +94,15 @@ class TelegramSpider:
         return text
 
     def search_query(self, url=''):
+        """
+        搜索指定URL的Telegram频道/群组信息
+        
+        Args:
+            url (str): t.me链接
+            
+        Returns:
+            dict: 频道/群组的基本信息
+        """
         print('start...')
         if not url:
             return {}
@@ -69,47 +112,175 @@ class TelegramSpider:
         return tel_data
 
     def _set_params(self, url):
+        """
+        设置请求参数
+        
+        Args:
+            url (str): 目标URL
+        """
         self._url = url
 
 
 class TelegramAPIs(object):
+    """
+    Telegram API客户端类，提供完整的Telegram API功能
+    包括群组管理、消息获取、用户信息查询、文件下载等核心功能
+    """
+
     def __init__(self):
+        """
+        初始化API客户端实例
+        """
         self.client = None
+        self.download_manager = None
 
-    def init_client(self, session_name, api_id, api_hash, proxy=None):
+    async def init_client(self, session_name, api_id, api_hash, proxy=None):
         """
-        初始化client
-        :param session_name: session文件名
-        :param api_id: api id
-        :param api_hash: api hash
-        :param proxy: socks代理，默认为空
+        初始化Telegram客户端连接
+        
+        Args:
+            session_name (str): session文件路径，用于保持登录状态
+            api_id (str): Telegram API ID
+            api_hash (str): Telegram API Hash
+            proxy (tuple, optional): 代理配置，格式为(协议, IP, 端口)
         """
-        if proxy is None:
-            self.client = TelegramClient(session_name, api_id, api_hash)
-        else:
-            self.client = TelegramClient(session_name, api_id, api_hash, proxy=proxy)
-        self.client.start()
+        # 处理proxy参数
+        client_kwargs = {}
+        if proxy:
+            client_kwargs['proxy'] = proxy
+            
+        # 设置Telethon日志等级为WARNING，减少冗余日志输出
+        logging.getLogger('telethon').setLevel(logging.WARNING)
+        
+        self.client = TelegramClient(session_name, api_id, api_hash, **client_kwargs)
+        
+        # 连接并启动客户端
+        await self.client.connect()
+        if not await self.client.is_user_authorized():
+            logger.error(f"Session {session_name} 未授权，需要重新登录")
+            return False
+        
+        # 初始化下载管理器
+        self.download_manager = TelegramDownloadManager(self.client)
+        return True
 
-    def close_client(self):
-        """
-        关闭client
-        """
-        if self.client.is_connected():
-            self.client.disconnect()
 
-    # 加入频道或群组
+    async def close_client(self):
+        """
+        关闭Telegram客户端连接
+        释放网络资源，防止session文件锁定
+        """
+        if self.client:
+            try:
+                if self.client.is_connected():
+                    await self.client.disconnect()
+                # 等待一小段时间确保连接完全关闭
+                import asyncio
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.error(f'关闭Telegram客户端时发生错误: {e}')
+            finally:
+                self.client = None
+
+    def _ensure_directory(self, path):
+        """
+        确保指定目录存在，不存在则创建
+        
+        Args:
+            path (str): 目录路径
+        """
+        os.makedirs(path, exist_ok=True)
+
+    async def _download_avatar(self, chat, avatar_path):
+        """
+        下载频道/群组头像到本地
+        
+        Args:
+            chat: Telegram聊天对象（频道或群组）
+            avatar_path (str): 头像保存的本地目录
+            
+        Returns:
+            str: 头像的相对路径，如果没有头像则返回空字符串
+        """
+        photo_path = ''
+        photo = chat.photo
+        if photo and hasattr(photo, "photo_id"):
+            file_full_path = f'{avatar_path}/{str(photo.photo_id)}.jpg'
+            photo_path = f'images/avatar/{str(photo.photo_id)}.jpg'
+            if not os.path.exists(file_full_path):              
+                await self.client.download_profile_photo(entity=chat, file=file_full_path)
+        return photo_path
+
+    def _parse_message_sender(self, message):
+        """
+        解析消息发送者的详细信息
+        
+        Args:
+            message: Telegram消息对象
+            
+        Returns:
+            dict: 包含user_id, user_name, nick_name的发送者信息字典
+        """
+        sender_info = {
+            "user_id": 0,
+            "user_name": "",
+            "nick_name": ""
+        }
+        
+        try:
+            if message.sender:
+                sender_info["user_id"] = message.sender.id
+                if isinstance(message.sender, ChannelForbidden):
+                    username = ""
+                else:
+                    username = message.sender.username
+                    username = username if username else ""
+                sender_info["user_name"] = username
+                
+                if isinstance(message.sender, Channel) or isinstance(message.sender, ChannelForbidden):
+                    first_name = message.sender.title
+                    last_name = ""
+                else:
+                    first_name = message.sender.first_name
+                    last_name = message.sender.last_name
+                    first_name = first_name if first_name else ""
+                    last_name = " " + last_name if last_name else ""
+                sender_info["nick_name"] = "{0}{1}".format(first_name, last_name)
+        except Exception as e:
+            logger.warning(f'无法获取发送者信息 message_id:{message.id}, user_id:{getattr(message, "from_id", "unknown")}: {e}')
+            # 设置默认值，继续处理消息
+            if hasattr(message, 'from_id') and message.from_id:
+                if hasattr(message.from_id, 'user_id'):
+                    sender_info["user_id"] = message.from_id.user_id
+                else:
+                    sender_info["user_id"] = 0
+            else:
+                sender_info["user_id"] = 0
+        
+        return sender_info
+
     async def join_conversation(self, invite):
         """
-        加入方式主要分为
-            1. 加入公开群组/频道：invite为username
-            2. 加入私有群组/频道：invite为hash
-
-        注意：需要测试如下两个逻辑，
-            1. 换了群组的username之后，使用新username加入时的返回值(会显示无效，已测)
-            2. 是否能直接通过ID加入(不能，通过id只能获取已经加入的频道/群组信息，并通过get_entity方法获取该频道的信息)
-        :param invite: channel/group username/hash
-        :return: 返回json, {'data': {'id':, 'chat':}, 'result': 'success/failed', 'reason':''}
-        data: chat_id
+        加入Telegram频道或群组
+        
+        支持两种加入方式：
+        1. 公开群组/频道：使用username（如：@channelname）
+        2. 私有群组/频道：使用邀请链接的hash部分
+        
+        Args:
+            invite (str): 频道/群组的username或邀请链接hash
+            
+        Returns:
+            dict: 加入结果，格式为：
+                {
+                    "data": {"id": chat_id, "group_name": invite},
+                    "result": "Done/Failed", 
+                    "reason": "错误原因"
+                }
+        
+        Note:
+            - 无法通过纯数字ID直接加入频道/群组
+            - 更换username后，旧username将失效
         """
         # 每个加组的操作都休眠10秒先，降低速率
         time.sleep(5)
@@ -126,14 +297,11 @@ class TelegramAPIs(object):
             updates = await self.client(CheckChatInviteRequest(invite))
             if isinstance(updates, ChatInviteAlready):
                 chat_id = updates.chat.id
-                # chat = updates.chat
                 result = "Done"
             elif isinstance(updates, ChatInvite):
                 # Joining a private chat or channel
                 updates = await self.client(ImportChatInviteRequest(invite))
-                # updates = self.client(CheckChatInviteRequest(invite))
                 chat_id = updates.chats[0].id
-                # chat = updates.chats[0]
                 result = "Done"
         except Exception as e:
             try:
@@ -144,7 +312,6 @@ class TelegramAPIs(object):
                 result_json["reason"] = str(ee)
                 return result_json
             chat_id = updates.chats[0].id
-            # chat = updates.chats[0]
         result_json["data"]["id"] = chat_id
         result_json["result"] = result
 
@@ -152,7 +319,15 @@ class TelegramAPIs(object):
 
     def delete_all_dialog(self, is_all=0):
         """
-        删除对话框
+        批量删除对话框
+        
+        根据条件删除不同类型的对话：
+        - 删除已删除账户的对话
+        - 删除特定模式的用户对话（包含数字组合的用户名）
+        - 可选择删除所有群组/频道对话
+        
+        Args:
+            is_all (int): 是否删除所有对话，0=仅删除特定条件，1=删除所有
         """
         for dialog in self.client.get_dialogs():
             # like "4721 4720"、"5909 5908"
@@ -183,32 +358,65 @@ class TelegramAPIs(object):
 
     async def get_me(self):
         """
-        获取当前账户信息
+        获取当前登录账户的详细信息
+        
+        Returns:
+            User: 当前账户的完整信息对象，包含ID、用户名、姓名等
         """
         myself = await self.client.get_me()
         return myself
 
     def get_contacts(self):
         """
-        获取联系人
+        获取当前账户的所有联系人列表
+        
+        Returns:
+            ContactsContacts: 联系人列表对象，包含用户信息和联系人数量
         """
         contacts = self.client(GetContactsRequest(0))
         return contacts
 
     def delete_contact(self, ids):
         """
-        删除联系人
+        批量删除指定的联系人
+        
+        Args:
+            ids (list): 要删除的联系人ID列表
         """
         self.client(DeleteContactsRequest(ids))
 
     async def get_dialog_list(self):
         """
-        获取已经加入的频道/群组列表
-        :return: 返回json, {'data': [], 'result': 'success/failed', 'reason':''}
-        data: list类型，
+        获取当前账户已加入的所有频道和群组列表
+        
+        自动下载并保存频道/群组头像，提取详细信息包括：
+        - 基本信息：ID、标题、用户名
+        - 统计信息：成员数量、未读消息数
+        - 媒体信息：头像路径
+        - 分类信息：频道/群组类型、公开/私有状态
+        
+        Yields:
+            dict: 每个频道/群组的详细信息，格式为：
+                {
+                    "result": "success",
+                    "reason": "ok", 
+                    "data": {
+                        "id": int,
+                        "title": str,
+                        "username": str,
+                        "megagroup": "channel/group",
+                        "member_count": int,
+                        "channel_description": str,
+                        "is_public": int,
+                        "join_date": str,
+                        "unread_count": int,
+                        "group_type": str,
+                        "photo_path": str
+                    }
+                }
         """
         avatar_path = os.path.join(app.static_folder, 'images/avatar')
-        os.makedirs(avatar_path, exist_ok=True)
+        self._ensure_directory(avatar_path)
         async for dialog in self.client.iter_dialogs():
             # 确保每次数据的准确性
             result_json = {"result": "success", "reason": "ok", 'data': {}}
@@ -220,15 +428,10 @@ class TelegramAPIs(object):
                     channel_full = await self.client(GetFullChannelRequest(chat))
                     member_count = channel_full.full_chat.participants_count
                     channel_description = channel_full.full_chat.about
-                    username = channel_full.chats[0].username
+                    username = await self._process_channel_username(chat, channel_full)
                     megagroup = channel_full.chats[0].megagroup
                     group_type = 'channel' if not megagroup else 'group'
-                    photo = chat.photo
-                    if photo and hasattr(photo, "photo_id"):
-                        file_full_path = f'{avatar_path}/{str(photo.photo_id)}.jpg'
-                        if not os.path.exists(file_full_path):
-                            photo_path = f'images/avatar/{str(photo.photo_id)}.jpg'
-                            await self.client.download_profile_photo(entity=chat, file=file_full_path)
+                    photo_path = await self._download_avatar(chat, avatar_path)
                 elif isinstance(chat, Chat):
                     channel_full = await self.client(GetFullChatRequest(chat.id))
                     member_count = channel_full.chats[0].participants_count
@@ -239,9 +442,7 @@ class TelegramAPIs(object):
                 else:
                     yield result_json
                     continue
-                # megagroup: true表示超级群组(官方说法)
-                # 实际测试发现(TaiwanNumberOne该群组)，megagroup表示频道或群组，true表示群，false表示频道
-                # democracy: 暂时不清楚什么意思
+
                 out = {
                     "id": chat.id,
                     "title": chat.title,
@@ -259,32 +460,79 @@ class TelegramAPIs(object):
                 result_json["data"] = out
                 yield result_json
 
+    async def _process_channel_username(self, chat, channel_full):
+        """
+        稳定获取频道/群组用户名的方法
+        
+        优先级：
+        1. chat.username (传统单用户名)
+        2. channel_full.chats[0].username (备用单用户名)
+        3. usernames列表中editable=True的主用户名
+        4. usernames列表中第一个active=True的用户名
+        5. usernames列表中第一个用户名（最后备用）
+        """
+        # 方法1: 直接从chat实体获取传统用户名
+        username = chat.username
+        if username:
+            return username
+            
+        # 方法2: 从完整频道信息获取传统用户名
+        username = channel_full.chats[0].username
+        if username:
+            return username
+            
+        # 方法3: 处理多用户名系统 - 优先检查chat对象的usernames
+        usernames_list = None
+        if hasattr(chat, "usernames") and chat.usernames:
+            usernames_list = chat.usernames
+        elif hasattr(channel_full.full_chat, "usernames") and channel_full.full_chat.usernames:
+            usernames_list = channel_full.full_chat.usernames
+        
+        if usernames_list:
+            # 优先返回可编辑的主用户名 (editable=True)
+            for u in usernames_list:
+                if (hasattr(u, 'editable') and u.editable and 
+                    hasattr(u, 'active') and u.active):
+                    return u.username
+            
+            # 备用1: 返回第一个活跃的用户名
+            for u in usernames_list:
+                if hasattr(u, 'active') and u.active:
+                    return u.username
+            
+            # 备用2: 返回列表中第一个用户名
+            if usernames_list:
+                return usernames_list[0].username
+                
+        return None
+
+
     async def get_person_dialog_list(self):
         """
-        获取个人聊天
-        :return: 返回json, {'data': [], 'result': 'success/failed', 'reason':''}
-        data: list类型，
+        获取所有个人聊天对话列表
+        
+        只返回与个人用户的对话，排除群组和频道
+        
+        Returns:
+            list: 个人对话列表，每个元素包含：
+                {
+                    "id": int,           # 用户ID
+                    "username": str,     # 用户名
+                    "user_id": int,      # 用户ID（重复）
+                    "unread_count": int  # 未读消息数
+                }
         """
         result = []
         async for dialog in self.client.iter_dialogs():
             # 确保每次数据的准确性
             chat = dialog.entity
-            # if isinstance(chat, Chat):
-            #     channel_full = await self.client(GetFullChatRequest(chat.id))
-            #     member_count = channel_full.chats[0].participants_count
-            #     # channel_description = channel_full.full_chat.about
-            #     channel_description = ""
-            #     username = None
-            #     megagroup = True
             if isinstance(chat, User):
                 channel_full = await self.client(GetFullUserRequest(chat.id))
                 username = channel_full.users[0].username or ''
                 user_id = channel_full.users[0].id
             else:
                 continue
-            # megagroup: true表示超级群组(官方说法)
-            # 实际测试发现(TaiwanNumberOne该群组)，megagroup表示频道或群组，true表示群，false表示频道
-            # democracy: 暂时不清楚什么意思
+
             out = {
                 "id": chat.id,
                 "username": username,
@@ -296,11 +544,18 @@ class TelegramAPIs(object):
 
     async def get_dialog(self, chat_id, is_more=False):
         """
-        方法一：通过遍历的方式获取chat对象，当chat_id相等时，返回
-        方法二：对于已经加入的频道/群组，可以直接使用get_entity方法
-        :param chat_id: 群组/频道 ID
-        :param is_more: 默认为False，不使用遍历的方式
-        :return: chat对象，用于后续操作
+        根据chat_id获取对话实体对象
+        
+        提供两种获取方式：
+        1. 直接方式：使用get_entity()方法（推荐，速度快）
+        2. 遍历方式：遍历所有对话找到匹配的ID（兜底方案）
+        
+        Args:
+            chat_id (int): 群组/频道的唯一ID
+            is_more (bool): 是否使用遍历方式，默认False使用直接方式
+            
+        Returns:
+            Chat/Channel/User: Telegram实体对象，可用于后续API调用
         """
         # 方法一
         if is_more:
@@ -315,34 +570,62 @@ class TelegramAPIs(object):
 
         return chat
 
+
     async def scan_message(self, chat, **kwargs):
         """
-        遍历消息
-        :param chat:
-        :param kwargs:
+        扫描指定频道/群组的历史消息
+        
+        完整处理消息内容，包括：
+        - 文本内容提取
+        - 发送者信息解析  
+        - 媒体文件下载（图片、文档）
+        - 回复和转发信息处理
+        - 智能限流防止被封
+        
+        Args:
+            chat: Telegram聊天实体对象
+            **kwargs: 扫描参数
+                - limit (int): 消息数量限制
+                - last_message_id (int): 起始消息ID
+                - offset_date (datetime, optional): 起始日期
+                - reverse (bool, optional): 遍历方向，默认False（新到旧），True为旧到新
+                
+        Yields:
+            dict: 每条消息的详细信息，包含：
+                - message_id: 消息ID
+                - user_id, user_name, nick_name: 发送者信息
+                - chat_id: 所属聊天ID
+                - postal_time: 发送时间
+                - message: 消息文本内容
+                - photo: 图片信息（已下载）
+                - document: 文档信息（已下载）
+                - reply_to_msg_id: 回复的消息ID
+                - from_name, from_time: 转发来源信息
+                - replies_info: 回复统计信息
         """
         tick = 0
         waterline = randint(5, 20)
-        limit = kwargs["limit"]
-        min_id = kwargs["last_message_id"]
+        limit = kwargs.get("limit", 100)
+        min_id = kwargs.get("last_message_id", -1)
         # 默认只能从最远开始爬取
         offset_date = kwargs.get("offset_date", None)
+        reverse = kwargs.get("reverse", False)
         count = 0
         image_path = os.path.join(app.static_folder, 'images')
-        os.makedirs(image_path, exist_ok=True)
+        self._ensure_directory(image_path)
         document_path = os.path.join(app.static_folder, 'document')
-        os.makedirs(document_path, exist_ok=True)
+        self._ensure_directory(document_path)
         async for message in self.client.iter_messages(
                 chat,
                 limit=limit,
                 offset_date=offset_date,
                 offset_id=min_id,
                 wait_time=1,
-                reverse=False,
+                reverse=reverse,
         ):
 
             if isinstance(message, Message):
-                logger.info(f'message | chat_id:{chat.id}, info:{message.to_dict()}')
+                logger.debug(f'message | chat_id:{chat.id}, info:{message.to_dict()}')
                 content = ""
                 try:
                     content = message.message
@@ -350,70 +633,25 @@ class TelegramAPIs(object):
                     print(e)
                 m = dict()
                 m["message_id"] = message.id
-                m["user_id"] = 0
-                m["user_name"] = ""
-                m["nick_name"] = ""
                 m["reply_to_msg_id"] = 0
                 m["from_name"] = ""
                 m["from_time"] = datetime.datetime.fromtimestamp(657224281)
-                if message.sender:
-                    m["user_id"] = message.sender.id
-                    if isinstance(message.sender, ChannelForbidden):
-                        username = ""
-                    else:
-                        username = message.sender.username
-                        username = username if username else ""
-                    m["user_name"] = username
-                    if isinstance(message.sender, Channel) or isinstance(
-                            message.sender, ChannelForbidden
-                    ):
-                        first_name = message.sender.title
-                        last_name = ""
-                    else:
-                        first_name = message.sender.first_name
-                        last_name = message.sender.last_name
-                        first_name = first_name if first_name else ""
-                        last_name = " " + last_name if last_name else ""
-                    m["nick_name"] = "{0}{1}".format(first_name, last_name)
+                
+                # 使用公共方法解析发送者信息
+                sender_info = self._parse_message_sender(message)
+                m.update(sender_info)
                 if message.is_reply:
                     m["reply_to_msg_id"] = message.reply_to_msg_id
                 if message.forward:
                     m["from_name"] = message.forward.from_name
                     m["from_time"] = message.forward.date
                 m["chat_id"] = chat.id
-                # m['postal_time'] = message.date.strftime('%Y-%m-%d %H:%M:%S')
                 m["postal_time"] = message.date
                 m["message"] = content
-                photo = message.photo
-                m['photo'] = {}
-                if photo and hasattr(photo, "id"):
-                    file_name = f'{image_path}/{str(photo.id)}.jpg'
-                    m['photo'] = {
-                        'photo_id': photo.id,
-                        'access_hash': photo.access_hash,
-                        'file_path': f'images/{str(photo.id)}.jpg'
-                    }
-                    if not os.path.exists(file_name):
-                        await self.client.download_media(message=message, file=file_name, thumb=-1)
-                document = message.document
-                m['document'] = {}
-                if document and document.attributes:
-                    file_name = ''
-                    for attr in document.attributes:
-                        if isinstance(attr, DocumentAttributeFilename):
-                            file_name = attr.file_name
-                            break
-                    if file_name:
-                        file_path = f'{document_path}/{file_name}'
-                        m['document'] = {
-                            'document_id': document.id,
-                            'file_name': file_name,
-                            'file_ext': file_name.split('.')[-1],
-                            'access_hash': document.access_hash,
-                            'file_path': f'document/{file_name}'
-                        }
-                        if not os.path.exists(file_path):
-                            await self.client.download_media(message=message, file=file_path)
+                # 处理照片
+                m['photo'] = await self.download_manager.process_photo(message, image_path)
+                # 处理文档
+                m['document'] = await self.download_manager.process_document(message, document_path)
                 m['replies_info'] = {}
                 if message.replies:
                     try:
@@ -427,89 +665,28 @@ class TelegramAPIs(object):
                     time.sleep(waterline)
                 count += 1
                 yield m
-        print("total: %d" % count)
 
-    async def scan_message_photo(self, chat, **kwargs):
-        """
-        遍历消息
-        :param chat:
-        :param kwargs:
-        """
-        tick = 0
-        waterline = randint(5, 20)
-        limit = kwargs["limit"]
-        min_id = kwargs["last_message_id"]
-        # 默认只能从最远开始爬取
-        offset_date = None
-        if 0 and kwargs["offset_date"]:
-            offset_date = datetime.datetime.strptime(
-                kwargs["offset_date"], "%Y-%m-%d %H:%M:%S"
-            )
-        count = 0
-        async for message in self.client.iter_messages(
-                chat,
-                limit=limit,
-                offset_date=offset_date,
-                offset_id=min_id,
-                wait_time=1,
-                reverse=True,
-                filter=InputMessagesFilterPhotos):
-
-            if isinstance(message, Message):
-                content = ""
-                try:
-                    content = message.message
-                except Exception as e:
-                    print(e)
-                if content == "":
-                    continue
-                m = dict()
-                m["message_id"] = message.id
-                m["user_id"] = 0
-                m["user_name"] = ""
-                m["nick_name"] = ""
-                m["reply_to_msg_id"] = 0
-                m["from_name"] = ""
-                m["from_time"] = datetime.datetime.fromtimestamp(657224281)
-                if message.sender:
-                    m["user_id"] = message.sender.id
-                    if isinstance(message.sender, ChannelForbidden):
-                        username = ""
-                    else:
-                        username = message.sender.username
-                        username = username if username else ""
-                    m["user_name"] = username
-                    if isinstance(message.sender, Channel) or isinstance(
-                            message.sender, ChannelForbidden
-                    ):
-                        first_name = message.sender.title
-                        last_name = ""
-                    else:
-                        first_name = message.sender.first_name
-                        last_name = message.sender.last_name
-                        first_name = first_name if first_name else ""
-                        last_name = " " + last_name if last_name else ""
-                    m["nick_name"] = "{0}{1}".format(first_name, last_name)
-                if message.is_reply:
-                    m["reply_to_msg_id"] = message.reply_to_msg_id
-                if message.forward:
-                    m["from_name"] = message.forward.from_name
-                    m["from_time"] = message.forward.date
-                m["chat_id"] = chat.id
-                # m['postal_time'] = message.date.strftime('%Y-%m-%d %H:%M:%S')
-                m["postal_time"] = message.date
-                m["message"] = content
-                m['photo'] = message.photo
-                tick += 1
-                if tick >= waterline:
-                    tick = 0
-                    waterline = randint(5, 10)
-                    time.sleep(waterline)
-                count += 1
-                yield m
-        print("total: %d" % count)
 
     async def get_chatroom_user_info(self, chat_id, nick_name):
+        """
+        在指定频道/群组中搜索特定昵称的用户信息
+        
+        Args:
+            chat_id (int): 频道/群组ID
+            nick_name (str): 要搜索的用户昵称
+            
+        Returns:
+            list: 匹配的用户信息列表，每个元素包含：
+                {
+                    "user_id": int,        # 用户ID
+                    "username": str,       # 用户名
+                    "first_name": str,     # 名字
+                    "last_name": str       # 姓氏
+                }
+                
+        Note:
+            搜索结果数量随机限制在5-10个，避免触发限流
+        """
         chat = await self.get_dialog(chat_id)
         result = []
         try:
@@ -541,6 +718,27 @@ class TelegramAPIs(object):
         return result
 
     async def get_chatroom_all_user_info(self, chat_id):
+        """
+        获取指定频道/群组的所有用户信息
+        
+        获取最近活跃的用户列表，适用于分析群组成员构成
+        
+        Args:
+            chat_id (int): 频道/群组ID
+            
+        Returns:
+            list: 用户信息列表，每个元素包含：
+                {
+                    "user_id": int,        # 用户ID
+                    "username": str,       # 用户名
+                    "first_name": str,     # 名字
+                    "last_name": str       # 姓氏
+                }
+                
+        Note:
+            - 限制返回最近的50个活跃用户
+            - 大型群组可能无法获取完整用户列表（API限制）
+        """
         chat = await self.get_dialog(chat_id)
         result = []
         try:
@@ -571,8 +769,34 @@ class TelegramAPIs(object):
         return result
 
     async def get_full_channel(self, chat_id):
+        """
+        获取指定频道/群组的完整详细信息
+        
+        获取比基本信息更详细的数据，包括描述、统计信息等
+        同时下载并保存头像文件
+        
+        Args:
+            chat_id (int): 频道/群组ID
+            
+        Returns:
+            dict: 详细信息字典，包含：
+                {
+                    "id": int,                    # 频道/群组ID
+                    "title": str,                 # 标题
+                    "username": str,              # 用户名
+                    "megagroup": str,             # "channel" 或 "group"
+                    "member_count": int,          # 成员数量
+                    "channel_description": str,   # 描述信息
+                    "is_public": int,            # 是否公开 (1/0)
+                    "join_date": str,            # 加入日期
+                    "photo_path": str            # 头像本地路径
+                }
+                
+        Note:
+            如果频道不存在或无权访问，返回空字典
+        """
         avatar_path = os.path.join(app.static_folder, 'images/avatar')
-        os.makedirs(avatar_path, exist_ok=True)
+        self._ensure_directory(avatar_path)
         chat = await self.get_dialog(chat_id)
         if not chat:
             return {}
@@ -583,13 +807,7 @@ class TelegramAPIs(object):
         channel_description = channel_full.full_chat.about
         username = channel_full.chats[0].username
         megagroup = channel_full.chats[0].megagroup
-        photo = chat.photo
-        photo_path = ''
-        if photo and hasattr(photo, "photo_id"):
-            file_full_path = f'{avatar_path}/{str(photo.photo_id)}.jpg'
-            if not os.path.exists(file_full_path):
-                photo_path = f'images/avatar/{str(photo.photo_id)}.jpg'
-                await self.client.download_media(message=chat, file=file_full_path, thumb=-1)
+        photo_path = await self._download_avatar(chat, avatar_path)
         out = {
             "id": chat.id,
             "title": chat.title,
@@ -605,6 +823,14 @@ class TelegramAPIs(object):
 
 
 def test_tg_spider():
+    """
+    测试TelegramSpider网页爬虫功能
+    
+    测试多个t.me链接的数据抓取，并根据账户类型进行分类：
+    - 个人账户：account字段包含'@'
+    - 群组账户：account字段包含'subscribers' 
+    - 其他账户：不符合上述条件的账户
+    """
     spider = TelegramSpider()
     url_list = ['https://t.me/feixingmeiluo', 'https://t.me/huaxuerou', 'https://t.me/ppo995']
     for url in url_list:
@@ -624,7 +850,7 @@ if __name__ == '__main__':
     app.ready(db_switch=False, web_switch=False, worker_switch=False)
     tg = TelegramAPIs()
     config_js = app.config['TG_CONFIG']
-    session_name = f'{app.static_folder}/utils/{config_js.get("web_session_name")}'
+    session_name = f'{app.static_folder}/utils/default-telegram.session'
     api_id = config_js.get("api_id")
     api_hash = config_js.get("api_hash")
     proxy = config_js.get("proxy", {})
@@ -640,74 +866,3 @@ if __name__ == '__main__':
     )
 
 
-    # async def get_me():
-    #     me = await tg.get_me()
-    #     print(f'me: {me}')
-
-    # async def get_group_list():
-    #     """
-    #     group_list: [{'result': 'success', 'reason': 'ok', 'data': {'id': 1610505522, 'title': '巴域商业中心超市', 'username': 'chaoshi99999', 'megagroup': 'channel', 'member_count': 4184, 'channel_description': '', 'is_public': 1, 'join_date': '2024-08-01 06:38:37+UTC', 'unread_count': 4425}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1857812395, 'title': '钉钉接码🌏京东接码💗美团接码🌏陌陌接码 @Qk66678 @ppo995@J5333@karamsang@truetrueaccbobi@qq5914 @maihao99bot@tuitehaocc8tuitehaocc8tuitehaocc@karams', 'username': 'kef43433', 'megagroup': 'group', 'member_count': 12478, 'channel_description': '', 'is_public': 1, 'join_date': '2024-08-01 06:34:43+UTC', 'unread_count': 34}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1270985546, 'title': '大咕咕咕鸡', 'username': 'dagudu', 'megagroup': 'group', 'member_count': 1955, 'channel_description': '大咕咕咕鸡，微博知名博主，叙事诗人，当代严肃文学特师，月入2300，代表作有《黄浦江有话讲》《一次突如其来的性生活》等，他的文章风格独特，自成一派，值得一看。\n\n特师文集： mindfucking.gitbook.io/daguguguji\n\n人间动物园： @renjiandongwuyuan\n\n频道维护猫： @lidamao_bot\n\n感谢 @RSStT_Bot 提供支持', 'is_public': 1, 'join_date': '2024-08-02 12:45:36+UTC', 'unread_count': 9}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1076212650, 'title': '@zhongwen 中文语言安装包🅥汉化翻译', 'username': None, 'megagroup': 'group', 'member_count': 258534, 'channel_description': '【华人在外】广告介绍 @Guanggao\n华人百万社群 @huaren\n50万人供需发布频道 @daifa\n91国产社区 @gaoqing\n广告自助发布 @C4bot\n🔍AV搜片群 @AVpian\n🔎搜群神器 @sosuo\n吃瓜搞笑爆料 @Chigua\n开车频道群组 @kaiche\n招聘频道 @zhaopin\n求职甩人 @qiuzhi\n免费群管机器人 @qunbot\n✅中文安装 @zhongwen\n\n☎️唯一广告负责联系人 @DDDDDD', 'is_public': 0, 'join_date': '2024-07-31 05:42:26+UTC', 'unread_count': 3}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1825747029, 'title': '玩偶姐姐 𝙃𝙤𝙣𝙜𝙆𝙤𝙣𝙜𝘿𝙤𝙡𝙡_𝙏𝙑', 'username': 'HongKongDoll_Public', 'megagroup': 'group', 'member_count': 11701, 'channel_description': '', 'is_public': 1, 'join_date': '2024-08-06 13:32:15+UTC', 'unread_count': 0}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1905420033, 'title': '上头电子烟原料 依托咪酯 依托终结者 化学交流', 'username': 'ulae4888', 'megagroup': 'group', 'member_count': 318, 'channel_description': '上头电子烟原料 依托咪酯 依托终结者 化学交流', 'is_public': 1, 'join_date': '2024-08-06 13:31:51+UTC', 'unread_count': 0}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1872484668, 'title': '海外引流 | 海外获客丨FB引流丨脸书广告丨@liubifafa @XNZ6625 @nk52020@dj9400 @duo788@uup99887 @ppo995@xone88@xincheng8887@kka995', 'username': 'dnaslkdas', 'megagroup': 'group', 'member_count': 30134, 'channel_description': '', 'is_public': 1, 'join_date': '2024-08-01 06:35:26+UTC', 'unread_count': 0}}, {'result': 'success', 'reason': 'ok', 'data': {'id': 1195428755, 'title': 'ShadowsocksVPN', 'username': 'vpnshadowsocks', 'megagroup': 'group', 'member_count': 1537, 'channel_description': 'Простой канал без всяких дополнительных данных. Только VPN. И приятное оформление для глаз\n\n💬 Наш чатик: @vpnShadowsockss\nReklama \n📢 По поводу вп писать сюда: \n@Creator_mann \n\n❤﷽Aใhล๓dนใเใใลh﷽❤', 'is_public': 1, 'join_date': '2024-08-01 06:37:29+UTC', 'unread_count': 0}}]
-    #
-    #     :return:
-    #     """
-    #     result = []
-    #     async for group in tg.get_dialog_list():
-    #         result.append(group)
-    #     print('group_list:', result)
-
-    #
-
-    async def join_group():
-        group_name = 'daxionfank'
-        result = await tg.join_conversation(group_name)
-        print(result)
-
-
-    #
-
-    async def scan_message_photo():
-        params = {
-            "limit": 20,
-            # "offset_date": datetime.datetime.now() - datetime.timedelta(hours=8) - datetime.timedelta(minutes=20),
-            "last_message_id": -1,
-        }
-        group_id = 777000
-        chat = await tg.get_dialog(group_id)
-        print(chat)
-        history = tg.scan_message(chat, **params)
-        async for message in history:
-            print(message)
-
-
-    #
-    #
-
-    # async def get_group_users():
-    #     group_id = 1610505522
-    #     result = await tg.get_chatroom_all_user_info(group_id)
-    #     print(result)
-
-    # async def get_group_users():
-    #     group_id = 1610505522
-    #     result = await tg.get_chatroom_user_info(group_id, '小胖')
-    #     print(result)
-
-    async def get_chat(chat_id):
-        chat = await tg.get_dialog(chat_id)
-        # channel_full = await tg.client(GetFullChannelRequest(chat))
-
-        print(chat)
-
-
-    async def get_person_dialog_list():
-        async for res in tg.get_dialog_list():
-            print(res)
-
-
-    async def get_full_channel(chat_id):
-        result = await tg.get_full_channel(chat_id)
-        print(result)
-
-
-    with tg.client:
-        tg.client.loop.run_until_complete(get_person_dialog_list())

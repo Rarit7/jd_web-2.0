@@ -170,6 +170,7 @@ log/
 /static/utils
 /static/document
 /static/send_file
+/static/dist
 
 /config_local.py
 
@@ -181,3 +182,48 @@ Selenium-Chrome-HTTP-Private-Proxy.zip
 
 nohup.out
 celerybeat-schedule.bak
+
+# Node.js dependencies
+frontend/node_modules/
+node_modules/
+
+# Vue.js build outputs
+frontend/dist/
+frontend/dist-ssr/
+
+# Development files
+frontend/.vite/
+frontend/.DS_Store
+
+# Environment variables
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+
+# Editor directories and files
+frontend/.vscode/*
+!frontend/.vscode/extensions.json
+frontend/.idea
+frontend/*.suo
+frontend/*.ntvs*
+frontend/*.njsproj
+frontend/*.sln
+frontend/*.sw?
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

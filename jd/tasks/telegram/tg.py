@@ -3,6 +3,7 @@ import datetime
 import logging
 import os
 import time
+from zoneinfo import ZoneInfo
 
 import requests
 from telethon import TelegramClient, errors
@@ -19,59 +20,10 @@ from jd.services.spider.tg import TgService
 logger = logging.getLogger(__name__)
 
 
-@celery.task
-def join_group(group_name, origin='celery'):
-    print(f'{group_name} join...')
-    tg = TgService.init_tg(origin)
-    if not tg:
-        logger.info(f'{group_name}, join_group error')
-        return f'{group_name} join group fail'
-
-    async def join():
-        try:
-            tg_group = TgGroup.query.filter(TgGroup.name == group_name).first()
-            if not tg_group:
-                return f'{group_name} join group fail, group not exist'
-            result = await tg.join_conversation(group_name)
-            chat_id = result.get('data', {}).get('id', 0)
-            if result.get('result', 'Failed') == 'Failed':
-                update_info = {
-                    'status': TgGroup.StatusType.JOIN_FAIL
-                }
-            else:
-                channel_full = await tg.get_full_channel(chat_id)
-                logger.info(f'{group_name} group info:{channel_full}')
-                update_info = {
-                    'status': TgGroup.StatusType.JOIN_SUCCESS,
-                    'chat_id': chat_id,
-                    'desc': channel_full.get("channel_description", ''),
-                    'avatar_path': channel_full.get('photo_path', ''),
-                    'title': channel_full.get("title", ''),
-                    'group_type': TgGroup.GroupType.CHANNEL if channel_full.get('megagroup',
-                                                                                '') == 'channel' else TgGroup.GroupType.GROUP,
-                }
-            tg_groups = TgGroup.query.filter(TgGroup.chat_id == chat_id).order_by(TgGroup.id.desc()).all()
-            if len(tg_groups) > 1:
-                # 更新原来的群组信息
-                TgGroup.query.filter(TgGroup.chat_id == chat_id).update(update_info)
-                # 删除新的的群组
-                _id = tg_groups[-1].id
-                TgGroup.query.filter_by(id=_id).delete()
-            else:
-                TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update(update_info)
-            db.session.commit()
-        except Exception as e:
-            logger.info('join_group error: {}'.format(e))
-            db.session.rollback()
-
-    with tg.client:
-        tg.client.loop.run_until_complete(join())
-
-    return f'{group_name} join group success'
 
 
 @celery.task
-def fetch_group_user_info(chat_id, user_id, nick_name, username, origin='celery'):
+async def fetch_group_user_info(chat_id, user_id, nick_name, username, sessionname):
     """
     获取群组用户的信息
     :param origin:
@@ -81,11 +33,45 @@ def fetch_group_user_info(chat_id, user_id, nick_name, username, origin='celery'
     :param username:
     :return:
     """
+    def download_photo(photo_url, user_id):
+        """
+        从URL下载用户头像并保存到本地
+        
+        Args:
+            photo_url (str): 头像图片的URL地址
+            user_id (str): 用户ID，用作文件名
+            
+        Returns:
+            str: 头像的相对路径
+        """
+        try:
+            logger.info(f'开始下载用户头像: user_id={user_id}, url={photo_url}')
+            response = requests.get(photo_url)
+            image_path = os.path.join(app.static_folder, 'images/avatar')
+            os.makedirs(image_path, exist_ok=True)
+            file_path = f'{image_path}/{user_id}.jpg'
+            
+            # 检查请求是否成功
+            if response.status_code == 200:
+                # 保存图片到本地
+                with open(file_path, 'wb') as file:
+                    file.write(response.content)
+                logger.info(f'用户头像下载成功: user_id={user_id}, 保存路径={file_path}')
+            else:
+                logger.warning(f'头像下载失败，HTTP状态码: {response.status_code}, user_id={user_id}')
+                file_path = ''
+        except Exception as e:
+            logger.error(f'用户头像下载异常: user_id={user_id}, 错误={e}')
+            file_path = ''
+
+        return f'images/avatar/{user_id}.jpg'
+    
     if not user_id or not nick_name:
         return
     user_id = str(user_id)
     group_user = TgGroupUserInfo.query.filter_by(user_id=user_id).first()
     if group_user:
+        # 添加不同群组中同一个用户的处理逻辑
         return
     if username:
         url = f'https://t.me/{username}'
@@ -96,7 +82,7 @@ def fetch_group_user_info(chat_id, user_id, nick_name, username, origin='celery'
         file_path = ''
         if photo_url:
             # 下载图片
-            file_path = TgService.download_photo(photo_url, user_id)
+            file_path = download_photo(photo_url, user_id)
 
         obj = TgGroupUserInfo(chat_id=chat_id, user_id=user_id, nickname=nick_name,
                               username=username,
@@ -105,149 +91,66 @@ def fetch_group_user_info(chat_id, user_id, nick_name, username, origin='celery'
         db.session.flush()
         db.session.commit()
     else:
-        tg = TgService.init_tg(origin)
+        tg = await TgService.init_tg(sessionname)
+        try:
+            async def get_chat_room_user_info(nickname):
+                nickname = nickname.split(' ')
+                if len(nickname) > 1:
+                    nickname = nickname[0]
+                user_info = await tg.get_chatroom_user_info(chat_id, nickname)
+                for user in user_info:
+                    uid = str(user['user_id'])
+                    last_name = user["last_name"] if user["last_name"] else ''
+                    n_name = f'{user["first_name"]}{last_name}'
+                    g_user = TgGroupUserInfo.query.filter_by(user_id=uid).first()
+                    if g_user:
+                        continue
+                    u = TgGroupUserInfo(chat_id=chat_id, user_id=uid, nickname=n_name,
+                                        username=user['username'])
+                    db.session.add(u)
+                    db.session.flush()
+                db.session.commit()
 
-        async def get_chat_room_user_info(nickname):
-            nickname = nickname.split(' ')
-            if len(nickname) > 1:
-                nickname = nickname[0]
-            user_info = await tg.get_chatroom_user_info(chat_id, nickname)
-            for user in user_info:
-                uid = str(user['user_id'])
-                last_name = user["last_name"] if user["last_name"] else ''
-                n_name = f'{user["first_name"]}{last_name}'
-                g_user = TgGroupUserInfo.query.filter_by(user_id=uid).first()
-                if g_user:
-                    continue
-                u = TgGroupUserInfo(chat_id=chat_id, user_id=uid, nickname=n_name,
-                                    username=user['username'])
-                db.session.add(u)
-                db.session.flush()
-            db.session.commit()
-
-        with tg.client:
-            tg.client.loop.run_until_complete(get_chat_room_user_info(nick_name))
+            async with tg.client:
+                await get_chat_room_user_info(nick_name)
+        finally:
+            if tg:
+                await tg.close_client()
 
     return f'群组:{chat_id}, fetch user:{nick_name} finished'
 
 
 @celery.task
-def fetch_group_recent_user_info(origin='celery'):
-    tg = TgService.init_tg(origin)
-
-    async def get_chat_room_user_info(chat_id, group_name):
-        join_result = await tg.join_conversation(group_name)
-        print(join_result)
-        user_info = await tg.get_chatroom_all_user_info(chat_id)
-        for user in user_info:
-            user_id = str(user["user_id"])
-            last_name = user["last_name"] if user["last_name"] else ''
-            n_name = f'{user["first_name"]}{last_name}'
-            username = user['username']
-            if not username:
-                obj = TgGroupUserInfo(chat_id=chat_id, user_id=user_id, nickname=n_name,
-                                      username=username)
-                db.session.add(obj)
-                db.session.commit()
-            else:
-                fetch_group_user_info(chat_id, user_id, n_name, user['username'])
-
-    tg_groups = TgGroup.query.filter_by(status=TgGroup.StatusType.JOIN_SUCCESS).all()
-    for group in tg_groups:
-        with tg.client:
-            tg.client.loop.run_until_complete(get_chat_room_user_info(int(group.chat_id), group.name))
-
-    return f'fetch recent users finished'
-
-
-@celery.task
-def fetch_person_chat_history(account_id, origin='celery'):
-    tg_account = TgAccount.query.filter(TgAccount.id == account_id).first()
-    if not tg_account:
-        return
-
-    tg = TelegramAPIs()
-    session_dir = f'{app.static_folder}/utils'
-    session_name = f'{session_dir}/{tg_account.name}/jd_{origin}.session'
-    if not os.path.exists(session_name):
-        logger.info(f'session {session_name} does not exist')
+async def fetch_group_recent_user_info(sessionname):
+    tg = await TgService.init_tg(sessionname)
     try:
-        tg.init_client(
-            session_name=session_name, api_id=tg_account.api_id, api_hash=tg_account.api_hash
-        )
-    except Exception as e:
-        logger.info(f'init_client error: {e}')
-        return
+        async def get_chat_room_user_info(chat_id, group_name):
+            join_result = await tg.join_conversation(group_name)
+            print(join_result)
+            user_info = await tg.get_chatroom_all_user_info(chat_id)
+            for user in user_info:
+                user_id = str(user["user_id"])
+                last_name = user["last_name"] if user["last_name"] else ''
+                n_name = f'{user["first_name"]}{last_name}'
+                username = user['username']
+                if not username:
+                    obj = TgGroupUserInfo(chat_id=chat_id, user_id=user_id, nickname=n_name,
+                                          username=username)
+                    db.session.add(obj)
+                    db.session.commit()
+                else:
+                    fetch_group_user_info(chat_id, user_id, n_name, user['username'])
 
-    group_id_list = []
+        tg_groups = TgGroup.query.filter_by(status=TgGroup.StatusType.JOIN_SUCCESS).all()
+        for group in tg_groups:
+            async with tg.client:
+                await get_chat_room_user_info(int(group.chat_id), group.name)
 
-    async def get_person_dialog_list():
-        async for chat_info in tg.get_dialog_list():
-            temp_data = chat_info.get('data', {})
-            _chat_id = temp_data.get('id', 0)
-            if not _chat_id:
-                logger.info(f'account, {account_id}, chat_id is empty, data:{temp_data}')
-                continue
+        return f'fetch recent users finished'
+    finally:
+        if tg:
+            await tg.close_client()
 
-            group_id_list.append(_chat_id)
-
-    async def get_chat_history_list(chat_id):
-        param = {
-            "limit": 60,
-            # "offset_date": datetime.datetime.now() - datetime.timedelta(hours=8) - datetime.timedelta(minutes=20),
-            "last_message_id": -1,
-        }
-        logger.info(f'account:{account_id}, 开始获取群组：{chat_id}，记录')
-
-        try:
-            chat = await tg.get_dialog(chat_id)
-        except Exception as e:
-            logger.info(f'chat_id:{chat_id}, 未获取到群组...{e}')
-            return
-        history_list = []
-        async for data in tg.scan_message(chat, **param):
-            history_list.append(data)
-        history_list.reverse()
-        message_id_list = [str(data.get("message_id", 0)) for data in history_list if data.get("message_id", 0)]
-        msg = TgGroupChatHistory.query.filter(TgGroupChatHistory.message_id.in_(message_id_list),
-                                              TgGroupChatHistory.chat_id == str(chat_id)).all()
-        already_message_id_list = [data.message_id for data in msg]
-        for data in history_list:
-            user_id = data.get("user_id", 0)
-            if user_id == 777000:
-                # 客服
-                continue
-            message_id = str(data.get("message_id", 0))
-            if message_id in already_message_id_list:
-                continue
-            logger.info(f'fetch_person_chat_history data:{data}')
-            user_id = str(user_id)
-            nickname = data.get("nick_name", "")
-
-            obj = TgGroupChatHistory(
-                chat_id=str(chat_id),
-                message_id=message_id,
-                nickname=nickname,
-                username=data.get("user_name", ""),
-                user_id=user_id,
-                postal_time=data.get("postal_time", datetime.datetime.now()) + datetime.timedelta(hours=8),
-                message=data.get("message", ""),
-                reply_to_msg_id=str(data.get("reply_to_msg_id", 0)),
-                photo_path=data.get("photo", {}).get('file_path', ''),
-                document_path=data.get("document", {}).get('file_path', ''),
-                document_ext=data.get("document", {}).get('ext', ''),
-                replies_info=data.get('replies_info', '')
-            )
-            db.session.add(obj)
-        db.session.commit()
-
-    with tg.client:
-        tg.client.loop.run_until_complete(get_person_dialog_list())
-
-    for chat_id in group_id_list:
-        with tg.client:
-            tg.client.loop.run_until_complete(get_chat_history_list(chat_id))
-    tg.close_client()
 
 
 @celery.task
@@ -258,10 +161,21 @@ def fetch_account_channel(account_id, origin='celery'):
 
     tg = TelegramAPIs()
     session_dir = f'{app.static_folder}/utils'
-    session_name = f'{session_dir}/{tg_account.name}/jd_{origin}.session'
-    tg.init_client(
-        session_name=session_name, api_id=tg_account.api_id, api_hash=tg_account.api_hash
-    )
+    session_name = f'{session_dir}/{tg_account.name}-telegram.session'
+    logger.info(f'使用session文件获取频道列表: {tg_account.name}-telegram.session')
+    if not os.path.exists(session_name):
+        logger.warning(f'Session文件不存在: {session_name}')
+    else:
+        logger.info(f'Session文件存在: {session_name}')
+    try:
+        logger.info(f'开始初始化Telegram客户端获取频道，账户: {tg_account.name}')
+        tg.init_client(
+            session_name=session_name, api_id=tg_account.api_id, api_hash=tg_account.api_hash
+        )
+        logger.info(f'Telegram客户端初始化成功，准备获取频道列表，账户: {tg_account.name}')
+    except Exception as e:
+        logger.error(f'获取频道列表时Telegram客户端初始化失败，账户: {tg_account.name}, 错误: {e}')
+        return
 
     async def get_channel():
         async for result in tg.get_dialog_list():
@@ -296,54 +210,21 @@ def fetch_account_channel(account_id, origin='celery'):
                 db.session.add(obj)
             db.session.commit()
 
-    with tg.client:
-        tg.client.loop.run_until_complete(get_channel())
-
-
-@celery.task
-def send_phone_code(account_id, origin='celery'):
-    tg_account = TgAccount.query.filter(TgAccount.id == account_id).first()
-    if not tg_account:
-        return
-    session_name = get_session_name(tg_account.name, origin)
-    api_id = tg_account.api_id
-    api_hash = tg_account.api_hash
-    phone = tg_account.phone
-    if not api_id or not api_hash or not phone:
-        return
-
-    async def send_code():
-        if not client.is_connected():
-            await client.connect()
-        for i in range(5):
+    try:
+        with tg.client:
+            tg.client.loop.run_until_complete(get_channel())
+    finally:
+        if tg:
             try:
-                res = await client.send_code_request(phone, force_sms=False)
-                if res:
-                    TgAccount.query.filter(TgAccount.id == tg_account.id).update({
-                        'phone_code_hash': res.phone_code_hash,
-                    })
-                    db.session.commit()
-                    break
-            except Exception as e:
-                logger.info('send_code_request error: {}'.format(e))
-            time.sleep(1)
-        if client.is_connected():
-            client.disconnect()
-
-    client = TelegramClient(session_name, api_id, api_hash)
-
-    for i in range(3):
-        try:
-            client.loop.run_until_complete(send_code())
-            break
-        except Exception as e:
-            logger.info('send_code_request error: {}'.format(e))
-            time.sleep(1)
-    db.session.commit()
-    return
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(tg.close_client())
+                loop.close()
+            except Exception as close_error:
+                logger.error(f'关闭TG客户端失败: {close_error}')
 
 
-@celery.task
+
 def login_tg_account(account_id, origin='celery'):
     tg_account = TgAccount.query.filter(TgAccount.id == account_id).first()
     if not tg_account:
@@ -416,15 +297,18 @@ def login_tg_account(account_id, origin='celery'):
 
 def get_session_name(name, origin):
     session_dir = f'{app.static_folder}/utils'
-    session_dir = f'{session_dir}/{name}'
     os.makedirs(session_dir, exist_ok=True)
-    session_name = f'{session_dir}/jd_{origin}.session'
+    session_name = f'{session_dir}/{name}-telegram.session'
+    logger.info(f'构建session文件路径: {name}-telegram.session, 来源: {origin}')
+    if os.path.exists(session_name):
+        logger.info(f'Session文件存在: {session_name}')
+    else:
+        logger.info(f'Session文件不存在: {session_name}')
     return session_name
 
 
 if __name__ == '__main__':
     app.ready(db_switch=True, web_switch=False, worker_switch=True)
-    # send_phone_code(24)
     # 验证码登录
     # login_tg_account(24)
     # 密码登录

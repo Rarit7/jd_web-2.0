@@ -6,7 +6,7 @@ from jd.models.keyword_search import KeywordSearch
 from jd.models.keyword_search_parse_result import KeywordSearchParseResult
 from jd.models.tg_group import TgGroup
 from jd.services.spider.telegram_spider import TelegramSpider
-from jd.tasks.telegram.tg import join_group
+from jd.tasks.telegram.tg_join_group import join_group
 from utils.search_filter import find_accounts
 
 
@@ -86,7 +86,7 @@ def parse_search_result(batch_id: str):
         db.session.commit()
         for telegram_account in telegram_group_list:
             # 加入群组
-            join_group.delay(telegram_account)
+            join_group.delay(telegram_account, '', None)
 
     return f'batch:{batch_id} parse search result end'
 

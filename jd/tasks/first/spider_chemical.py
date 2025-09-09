@@ -53,7 +53,6 @@ def chemical_data_get_job():
 
 if __name__ == '__main__':
     app.ready(db_switch=True, web_switch=False, worker_switch=True)
-    # send_phone_code(24)
     # 验证码登录
     # login_tg_account(24)
     # 密码登录

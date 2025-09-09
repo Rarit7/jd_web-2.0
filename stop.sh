@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 停止flask
-pid=$(ps aux | grep 'Python -m web' | grep -v grep | awk '{print $2}')
+pid=$(ps aux | grep 'python -m web' | grep -v grep | awk '{print $2}')
 if [ -z "$pid" ]; then
   echo "Flask 未运行"
 else

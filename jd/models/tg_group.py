@@ -12,7 +12,7 @@ class TgGroup(BaseModel):
     title = db.Column(db.String(1024), nullable=False, default='', comment='群组名称')
     created_at = db.Column(db.DateTime, default=db.func.now())
     updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
-    account_id = db.Column(db.String(128), nullable=False, default='', comment='tg_account.user_id')
+    account_id = db.Column(db.String(128), nullable=False, default='', comment='TG账户数字ID')
     avatar_path = db.Column(db.String(1024), nullable=False, default='', comment='头像本地地址')
     remark = db.Column(db.String(128), nullable=False, default='', comment='备注')
     group_type = db.Column(db.Integer, nullable=False, default=1, comment='1-群组 2-频道')

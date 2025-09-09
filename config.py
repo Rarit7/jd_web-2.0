@@ -1,10 +1,12 @@
+import os
+
 # 路由前缀
 API_PREFIX = '/api'
 
 # mysql相关配置
-SQLALCHEMY_ECHO = True
+SQLALCHEMY_ECHO = False
 SQLALCHEMY_ENABLE_POOL = False
-SQLALCHEMY_DATABASE_URI = 'mysql+mysqldb://root:Hzc123123..@127.0.0.1:3306/jd?charset=utf8mb4'
+SQLALCHEMY_DATABASE_URI = 'mysql+mysqldb://root:QMBUME1T/z6eI4k0ZUdVs+vXITHDwhcgxdjG/smuyfY=@127.0.0.1:8906/jd?charset=utf8mb4'
 SQLALCHEMY_BINDS = {
 }
 
@@ -21,14 +23,13 @@ GOOGLE_COOKIE = '__Secure-ENID=16.SE=QMgMmolWzCYdOAeWRlYYdKeYjbSUFtP2bwuE0OMrE_e
 BAIDU_SPIDER_PROXIES = {}
 GOOGLE_SPIDER_PROXIES = {}
 
-# Tg配置
+# 默认爬取的页数
+SPIDER_DEFAULT_PAGE = 10
+
+# Telegram API配置
 TG_CONFIG = {
     "api_id": "26453858",
     "api_hash": "94aa8f0de4d11f9721233e996baf1016",
-    "session_name": "telsession",
-    "celery_session_name": "jd_celery.session",
-    "web_session_name": "jd_web.session",
-    "job_session_name": "jd_job.session",
     "sqlite_db_name": "jd_tg.db",
     "proxy": {
         "protocal": "socks5",
@@ -37,11 +38,34 @@ TG_CONFIG = {
     }
 }
 
-# 默认爬取的页数
-SPIDER_DEFAULT_PAGE = 10
+# Telegram群组历史回溯功能回溯历史消息的天数
+TG_HISTORY_DAYS = 30
 
+# Telegram文档下载设置
+TELEGRAM_DOWNLOAD_SETTINGS = {
+    "download_all": False,        # 下载所有文件
+    "download_images": True,      # 图片（jpg, bmp, png, webp, tiff, gif）
+    "download_audio": True,      # 音频（mp3, flac, wav, ogg）
+    "download_videos": False,     # 视频（mp4, mkv, webm, mov）
+    "download_archives": True,   # 压缩包（zip, rar, 7z, gz, bz2）
+    "download_documents": True,  # 文档（pdf, doc(x), xls(x), ppt(x), txt）
+    "download_programs": False    # 程序（apk, exe, elf）
+}
 
+# OXYABS配置
 OXYLABS_USERNAME = 'customer-hunyun__wgIH3-sessid-0008875723-sesstime-10'
 OXYLABS_PASSWORD = 'Wasd12345678+'
 OXYLABS_HOST = 'pr.oxylabs.io'
 OXYLABS_PORT = '7777'
+
+# 任务队列超时时间配置（秒）
+TASK_DEFAULT_TIMEOUTS = {
+    'update_group_history': 3600,      # 实时增量获取
+    'fetch_account_group_info': 1800,  # 账户群组信息同步
+    'fetch_new_group_history': 7200,   # 历史回溯
+    'manual_download_file': 3600,      # 手动下载文件
+    'default': 1800                    # 默认
+}
+
+# 最大排队等待时间（秒）
+TASK_MAX_WAIT_TIME = 7200  # 2小时

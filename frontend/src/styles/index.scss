@@ -1,0 +1,288 @@
+@import './variables.scss';
+
+// 重置样式
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  background-color: var(--el-bg-color-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}
+
+// 全局样式
+.clearfix::after {
+  content: '';
+  display: table;
+  clear: both;
+}
+
+// 滚动条样式
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(144, 147, 153, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(144, 147, 153, 0.5);
+}
+
+// 通用类
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.pull-left {
+  float: left;
+}
+
+.pull-right {
+  float: right;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.mb-0 {
+  margin-bottom: 0;
+}
+
+.mt-0 {
+  margin-top: 0;
+}
+
+.pb-0 {
+  padding-bottom: 0;
+}
+
+.pt-0 {
+  padding-top: 0;
+}
+
+// 隐藏类
+.hidden {
+  display: none !important;
+}
+
+.invisible {
+  visibility: hidden;
+}
+
+// 响应式隐藏
+@media (max-width: 768px) {
+  .hidden-sm-and-down {
+    display: none !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .hidden-sm-and-up {
+    display: none !important;
+  }
+}
+
+// Element Plus 样式覆盖
+.el-drawer__body {
+  padding: 0;
+}
+
+// 移除下拉菜单中router-link的下划线和颜色变化
+.el-dropdown-menu, .el-dropdown__popper .el-dropdown-menu {
+  a {
+    text-decoration: none !important;
+    color: inherit !important;
+    
+    &:link, &:visited, &:hover, &:focus, &:active {
+      text-decoration: none !important;
+      color: inherit !important;
+    }
+  }
+  
+  .router-link-active, .router-link-exact-active {
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+  
+  .el-dropdown-menu__item {
+    a, .router-link-active, .router-link-exact-active {
+      display: block;
+      width: 100%;
+      text-decoration: none !important;
+      color: inherit !important;
+      
+      &:link, &:visited, &:hover, &:focus, &:active {
+        text-decoration: none !important;
+        color: inherit !important;
+      }
+    }
+  }
+}
+
+// 全局移除所有router-link的默认样式
+a.router-link-active, a.router-link-exact-active {
+  text-decoration: none !important;
+  
+  &:hover, &:focus, &:active, &:visited {
+    text-decoration: none !important;
+  }
+}
+
+.el-menu--horizontal > .el-menu-item {
+  border-bottom: 2px solid transparent;
+}
+
+.el-menu--horizontal > .el-menu-item.is-active {
+  border-bottom: 2px solid var(--el-color-primary);
+}
+
+// 页面切换动画
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.28s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+// 面包屑导航样式
+.app-breadcrumb.el-breadcrumb {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 60px;
+  margin-left: 8px;
+
+  .no-redirect {
+    color: var(--el-text-color-placeholder);
+    cursor: text;
+  }
+}
+
+// 汉堡菜单按钮
+.hamburger {
+  display: inline-block;
+  vertical-align: middle;
+  width: 20px;
+  height: 20px;
+}
+
+.hamburger.is-active {
+  transform: rotate(90deg);
+}
+
+// 标签栏样式
+.tags-view-container {
+  height: var(--layout-tagsview-height);
+  width: 100%;
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-light);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.12), 0 0 3px 0 rgba(0, 0, 0, 0.04);
+}
+
+// 主内容区域
+.app-main {
+  min-height: calc(100vh - var(--layout-header-height) - var(--layout-tagsview-height));
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  padding: 20px;
+  background-color: var(--el-bg-color-page);
+}
+
+.fixed-header + .app-main {
+  padding-top: var(--layout-header-height);
+}
+
+// 登录页面样式
+.login-container {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .login-form {
+    border-radius: 6px;
+    background: #fff;
+    width: 400px;
+    padding: 40px 35px 15px 35px;
+    box-shadow: 0 0 40px #ddd;
+  }
+
+  .title-container {
+    text-align: center;
+    margin-bottom: 30px;
+
+    .title {
+      font-size: 26px;
+      color: var(--el-text-color-primary);
+      margin: 0px auto 40px auto;
+      font-weight: bold;
+    }
+  }
+}
+
+// 暗色模式样式调整
+.dark {
+  .login-container {
+    .login-form {
+      background: var(--el-bg-color-overlay);
+    }
+  }
+
+  .app-main {
+    background-color: var(--el-bg-color-page);
+  }
+}

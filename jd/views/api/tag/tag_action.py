@@ -1,4 +1,4 @@
-from flask import render_template, redirect, url_for, request, session
+from flask import request, session, jsonify
 
 from jd import db
 from jd.helpers.user import current_user_id
@@ -11,36 +11,200 @@ from jd.views.api import api
 
 @api.route('/tag/list', methods=['GET'])
 def tag_list():
-    tags = ResultTag.query.filter(ResultTag.status == ResultTag.StatusType.VALID).order_by(ResultTag.updated_at.desc()).all()
-    data = [{
-        'id': row.id,
-        'name': row.title,
-        'status': TagService.StatusMap[row.status],
-        'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-    } for row in tags]
+    try:
+        tags = ResultTag.query.filter(ResultTag.status == ResultTag.StatusType.VALID).order_by(ResultTag.updated_at.desc()).all()
+        data = [{
+            'id': row.id,
+            'name': row.title,
+            'color': row.color if hasattr(row, 'color') and row.color else '#409EFF',
+            'status': TagService.StatusMap[row.status],
+            'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'updated_at': row.updated_at.strftime('%Y-%m-%d %H:%M:%S'),
+        } for row in tags]
+        
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '',
+            'payload': {'data': data}
+        })
+    except Exception as e:
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
 
-    return render_template('tag_manage.html', data=data, role_ids=RoleService.user_roles(session['current_user_id']))
 
-
-@api.route('/tag/delete')
+@api.route('/tag/delete', methods=['DELETE', 'GET'])
 def tag_delete():
-    tag_id = get_or_exception('tag_id', request.args, 'int')
-    tag = ResultTag.query.filter_by(id=tag_id).first()
-    if tag:
-        ResultTag.query.filter_by(id=tag_id, status=ResultTag.StatusType.VALID).update(
-            {'status': ResultTag.StatusType.INVALID})
-
-    return redirect(url_for('api.tag_list'))
+    try:
+        # 支持JSON请求和传统请求
+        if request.method == 'DELETE' or request.headers.get('Content-Type') == 'application/json':
+            data = request.get_json()
+            tag_id = data.get('id') if data else request.args.get('tag_id')
+        else:
+            tag_id = request.args.get('tag_id')
+            
+        if not tag_id:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '缺少标签ID参数',
+                'payload': {}
+            }), 400
+            
+        tag_id = int(tag_id)
+        tag = ResultTag.query.filter_by(id=tag_id).first()
+        if tag:
+            ResultTag.query.filter_by(id=tag_id, status=ResultTag.StatusType.VALID).update(
+                {'status': ResultTag.StatusType.INVALID})
+            db.session.commit()
+            
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '删除成功',
+            'payload': {}
+        })
+            
+    except Exception as e:
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
 
 
 @api.route('/tag/add', methods=['POST'])
 def tag_add():
-    name = get_or_exception('name', request.form, 'str')
-    tag = ResultTag.query.filter_by(title=name).first()
-    if tag:
-        ResultTag.query.filter_by(title=name).update({'status': ResultTag.StatusType.VALID})
-    else:
-        tag = ResultTag(title=name)
-        db.session.add(tag)
+    try:
+        # 支持JSON请求和表单请求
+        if request.headers.get('Content-Type') == 'application/json':
+            data = request.get_json()
+            name = data.get('name')
+            color = data.get('color', '#409EFF')
+        else:
+            name = request.form.get('name')
+            color = request.form.get('color', '#409EFF')
+            
+        if not name or not name.strip():
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '标签名称不能为空',
+                'payload': {}
+            }), 400
+            
+        name = name.strip()
+        
+        # 检查是否已存在
+        existing_tag = ResultTag.query.filter_by(title=name).first()
+        if existing_tag:
+            if existing_tag.status == ResultTag.StatusType.INVALID:
+                # 重新激活已删除的标签
+                existing_tag.status = ResultTag.StatusType.VALID
+                existing_tag.color = color
+            else:
+                return jsonify({
+                    'err_code': 1,
+                    'err_msg': '标签名称已存在',
+                    'payload': {}
+                }), 400
+        else:
+            # 创建新标签
+            tag = ResultTag(title=name, color=color)
+            db.session.add(tag)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '添加成功',
+            'payload': {}
+        })
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
 
-    return redirect(url_for('api.tag_list'))
+
+@api.route('/tag/edit', methods=['PUT', 'POST'])
+def tag_edit():
+    try:
+        # 支持JSON请求和表单请求
+        if request.method == 'PUT' or request.headers.get('Content-Type') == 'application/json':
+            data = request.get_json()
+            if not data:
+                return jsonify({
+                    'err_code': 1,
+                    'err_msg': '请求数据为空',
+                    'payload': {}
+                }), 400
+            tag_id = data.get('id')
+            name = data.get('name')
+            color = data.get('color')
+        else:
+            tag_id = request.form.get('id')
+            name = request.form.get('name')
+            color = request.form.get('color')
+            
+        if not tag_id or not name or not name.strip():
+            return jsonify({
+                'err_code': 1,
+                'err_msg': f'参数不完整: id={tag_id}, name={name}, color={color}',
+                'payload': {}
+            }), 400
+            
+        try:
+            tag_id = int(tag_id)
+        except (ValueError, TypeError):
+            return jsonify({
+                'err_code': 1,
+                'err_msg': f'无效的标签ID: {tag_id}',
+                'payload': {}
+            }), 400
+            
+        name = name.strip()
+        
+        # 检查标签是否存在
+        tag = ResultTag.query.filter_by(id=tag_id, status=ResultTag.StatusType.VALID).first()
+        if not tag:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '标签不存在',
+                'payload': {}
+            }), 404
+            
+        # 检查新名称是否已被其他标签使用
+        existing_tag = ResultTag.query.filter(
+            ResultTag.title == name,
+            ResultTag.id != tag_id,
+            ResultTag.status == ResultTag.StatusType.VALID
+        ).first()
+        
+        if existing_tag:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '标签名称已存在',
+                'payload': {}
+            }), 400
+            
+        tag.title = name
+        if color is not None:
+            tag.color = color
+        db.session.commit()
+        
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '修改成功',
+            'payload': {}
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500

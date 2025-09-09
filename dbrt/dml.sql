@@ -1,15 +1,4 @@
-insert into jd.role (id, name, detail, status)
-values  (1, '超级管理员', '超级管理员，权限较大', 1),
-        (2, '普通用户', '基础角色', 1);
-
-
-insert into jd.user (id, username, password, status) values (1, 'admin', '1q2w3E2024SD', 1);
-
-
-insert into jd.user_role (id, user_id, role_id, status) values (1, 1, 1, 1);
-
-
-insert into jd.black_keyword (id, keyword, status, is_delete, created_at, updated_at)
+insert into black_keyword (id, keyword, status, is_delete, created_at, updated_at)
 values  (24, '财神', 0, 0, '2024-07-18 20:43:25', '2024-07-18 20:43:25'),
         (25, ' 娱乐', 0, 0, '2024-07-18 20:43:25', '2024-07-18 20:43:25'),
         (26, ' 发牌', 0, 0, '2024-07-18 20:43:25', '2024-07-18 20:43:25'),
@@ -225,59 +214,21 @@ values  (24, '财神', 0, 0, '2024-07-18 20:43:25', '2024-07-18 20:43:25'),
         (236, ' 二手信', 0, 0, '2024-07-18 20:56:53', '2024-07-18 20:56:53');
 
 
-insert into jd.keyword_search_parse_result (id, keyword, url, account, `desc`, created_at, updated_at)
-values  (1, '二手信', 'https://www.34f23.com', '15042934321', '客服咨询002', '2024-07-22 18:36:18', '2024-07-22 18:36:18'),
-        (2, '二手信', '', 'zjx383472', '微信号', '2024-07-22 18:36:18', '2024-07-22 18:36:18'),
-        (3, '过检烟油', 'http://www.dd22e14.com', '', '网址', '2024-07-22 18:36:46', '2024-07-22 18:36:46'),
-        (4, '过检烟油', '', '573847275', 'QQ号', '2024-07-22 18:37:01', '2024-07-22 18:37:01'),
-        (5, '过检烟油', '', '111222333432', '电话号码', '2024-07-22 18:37:15', '2024-07-22 18:37:15');
+insert into keyword_search_parse_result (id, keyword, url, account, `desc`, is_delete, created_at, updated_at)
+values  (1, '二手信', 'https://www.34f23.com', '15042934321', '客服咨询002', 0, '2024-07-22 18:36:18', '2024-07-22 18:36:18'),
+        (2, '二手信', '', 'zjx383472', '微信号', 0, '2024-07-22 18:36:18', '2024-07-22 18:36:18'),
+        (3, '过检烟油', 'http://www.dd22e14.com', '', '网址', 0, '2024-07-22 18:36:46', '2024-07-22 18:36:46'),
+        (4, '过检烟油', '', '573847275', 'QQ号', 0, '2024-07-22 18:37:01', '2024-07-22 18:37:01'),
+        (5, '过检烟油', '', '111222333432', '电话号码', 0, '2024-07-22 18:37:15', '2024-07-22 18:37:15');
 
 
-insert into jd.result_tag (id, title, status, created_at, updated_at)
-values  (1, '信件', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
-        (2, '烟油', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
-        (3, '色情', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
-        (4, '暴力', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
-        (5, '毒品', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
-        (6, '大麻', 0, '2024-07-27 12:04:57', '2024-07-27 12:04:57'),
-        (8, '123', 0, '2024-07-27 12:32:40', '2024-07-27 12:43:06');
-
-
-alter table chemical_platform_product_info add qq_number varchar(32) not null default '' comment 'QQ号';
-
-alter table tg_account add `api_id` varchar(32) not null default '' comment 'api_id';
-alter table tg_account add `api_hash` varchar(64) not null default '' comment 'api_hash';
-
-alter table tg_account add `two_step` int not null default 0 comment '两步验证';
-alter table tg_account add `code` varchar(16) not null default 0 comment '验证码';
-
-
-# code的默认值错了，修改一下，避免影响使用
-alter table tg_account change `code` `code` varchar(16) not null default '' comment '验证码';
-alter table tg_account add `api_code` varchar(16) not null default '' comment '平台验证码';
-
-# 头像本地地址
-alter table tg_group_user_info add avatar_path    varchar(1024) default ''                not null comment '头像本地地址';
-
-# 群组增加描述
-alter table tg_group add   `desc` varchar(1024) NOT NULL DEFAULT '' COMMENT '描述信息';
-
-alter table tg_group add account_id varchar(128) not null default '' comment 'tg_account.user_id';
-
-
-alter table tg_group add avatar_path    varchar(1024) default ''  not null comment '头像本地地址';
-
-alter table tg_group_chat_history add `document_path` varchar(256) NOT NULL DEFAULT '' COMMENT '视频/文件地址';
-
-alter table tg_group_chat_history add `document_ext` varchar(16) NOT NULL DEFAULT '' COMMENT '文件类型';
-
-alter table tg_group add remark varchar(128) not null default '' comment '备注';
-alter table tg_group add index `idx_remark` (`remark`);
-
-alter table tg_group_user_info add remark varchar(128) not null default '' comment '备注';
-alter table tg_group_user_info add index `idx_remark` (`remark`);
-
-alter table tg_group add group_type int not null default 1 comment '1-群组 2-频道';
-
+insert into result_tag (id, title, color, status, created_at, updated_at)
+values  (1, '信件', '#409EFF', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
+        (2, '烟油', '#409EFF', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
+        (3, '色情', '#F56C6C', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
+        (4, '暴力', '#E6A23C', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
+        (5, '毒品', '#F56C6C', 0, '2024-07-27 12:01:28', '2024-07-27 12:01:28'),
+        (6, '大麻', '#F56C6C', 0, '2024-07-27 12:04:57', '2024-07-27 12:04:57'),
+        (8, '123', '#409EFF', 0, '2024-07-27 12:32:40', '2024-07-27 12:43:06');
 
 

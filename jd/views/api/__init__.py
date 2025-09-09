@@ -38,7 +38,7 @@ class ApiBlueprint(Blueprint):
                                                                   UserRole.role_id.in_(role_ids),
                                                                   UserRole.status == UserRole.StatusType.VALID).first()
                     if not user_role:
-                        return redirect(url_for('api.user_no_permission'))
+                        raise APIException('权限不足', 40301, 403)
 
                 api_rule = '%s.%s' % ('api', rule.lstrip('/').replace('.', '_'))
                 rs = fn(*args, **kwargs)
@@ -55,3 +55,14 @@ class ApiBlueprint(Blueprint):
 
 
 api = ApiBlueprint('api', 'api')
+
+# 导入各个模块以注册路由
+# from . import index  # removed
+from . import user  
+from . import tg
+from . import chemical
+from . import black_keyword
+from . import tag
+from . import change_record
+from . import system
+from . import job_queue

@@ -1,0 +1,11 @@
+// 导出SCSS变量供JS使用
+:export {
+  menuText: #bfcbd9;
+  menuActiveText: #ffffff;
+  subMenuActiveText: #ffffff;
+  menuBg: #1f2d3d;
+  menuHover: #263445;
+  subMenuBg: #273849;
+  subMenuHover: #33506c;
+  sideBarWidth: 210px;
+}

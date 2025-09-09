@@ -2,7 +2,7 @@ import collections
 from io import BytesIO
 
 import pandas as pd
-from flask import jsonify, request, render_template, redirect, url_for, make_response, session
+from flask import jsonify, request, make_response, session
 
 from jd import db
 from jd.models.black_keyword import BlackKeyword
@@ -45,8 +45,16 @@ def black_keyword_list():
         'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S'),
     } for row in rows]
 
-    return render_template('black_words.html', data=data, total_pages=total_pages, current_page=page,
-                           role_ids=RoleService.user_roles(session['current_user_id']))
+    return jsonify({
+        'err_code': 0,
+        'err_msg': '',
+        'payload': {
+            'data': data,
+            'total_pages': total_pages,
+            'current_page': page,
+            'total_records': total_records
+        }
+    })
 
 
 @api.route('/black_keyword/add', methods=['POST'])
@@ -63,7 +71,7 @@ def black_keyword_add():
     for keyword in keyword_list:
         black_keyword = BlackKeyword(keyword=keyword.strip())
         db.session.add(black_keyword)
-    return redirect(url_for('api.black_keyword_list'))
+    return success({'message': '黑词添加成功'})
 
 
 @api.route('/black_keyword/delete', methods=['GET'])
@@ -80,7 +88,7 @@ def black_keyword_delete():
     db.session.query(BlackKeyword).filter(BlackKeyword.id == keyword_id,
                                           BlackKeyword.is_delete == BlackKeyword.DeleteType.NORMAL). \
         update({'is_delete': BlackKeyword.DeleteType.DELETE})
-    return redirect(url_for('api.black_keyword_list'))
+    return success({'message': '黑词添加成功'})
 
 
 @api.route('/black_keyword/search', methods=['POST'], roles=[ROLE_SUPER_ADMIN])
@@ -138,9 +146,17 @@ def black_keyword_search_result():
             if set(t_list) == set(search_tag):
                 parse_id_list.append(p_id)
         if not parse_id_list:
-            return render_template('search_result.html', data=[], total_pages=1, current_page=page,
-                                   tag_list=tag_list, search_keyword=search_keyword, search_tag=search_tag,
-                                   default_tag_id_list=default_tag_id_list, role_ids=RoleService.user_roles(session['current_user_id']))
+            return jsonify({
+                'err_code': 0,
+                'err_msg': '',
+                'payload': {
+                    'data': [],
+                    'total_pages': 1,
+                    'current_page': page,
+                    'total_records': 0,
+                    'tag_list': tag_list
+                }
+            })
 
     query = KeywordSearchParseResult.query.filter(
         KeywordSearchParseResult.is_delete == KeywordSearchParseResult.DeleteType.NORMAL)
@@ -175,9 +191,17 @@ def black_keyword_search_result():
             'tag_id_list': ','.join(parse_tag) if parse_tag else ''
         })
 
-    return render_template('search_result.html', data=data, total_pages=total_pages, current_page=page,
-                           tag_list=tag_list, search_keyword=search_keyword, search_tag=search_tag,
-                           default_tag_id_list=default_tag_id_list,role_ids=RoleService.user_roles(session['current_user_id']))
+    return jsonify({
+        'err_code': 0,
+        'err_msg': '',
+        'payload': {
+            'data': data,
+            'total_pages': total_pages,
+            'current_page': page,
+            'total_records': total_records,
+            'tag_list': tag_list
+        }
+    })
 
 
 @api.route('/black_keyword/result/tag/update', methods=['POST'])
@@ -227,7 +251,7 @@ def black_keyword_search_result_delete():
     parse_id = get_or_exception('parse_id', args, 'int')
     KeywordSearchParseResult.query.filter(KeywordSearchParseResult.id == parse_id).update(
         {'is_delete': KeywordSearchParseResult.DeleteType.DELETE})
-    return redirect(url_for('api.black_keyword_search_result'))
+    return success({'message': '黑词搜索结果删除成功'})
 
 
 @api.route('/black_keyword/result/add', methods=['POST'])
@@ -270,7 +294,15 @@ def black_keyword_search_queue_list():
             'now_page': search_data.page if search_data else 0,
             'created_at': q.created_at.strftime('%Y-%m-%d %H:%M:%S'),
         })
-    return render_template('search_queue.html', data=data, total_pages=1, current_page=1,role_ids=RoleService.user_roles(session['current_user_id']))
+    return jsonify({
+        'err_code': 0,
+        'err_msg': '',
+        'payload': {
+            'data': data,
+            'total_pages': 1,
+            'current_page': 1
+        }
+    })
 
 
 @api.route('/black_keyword/result/download', methods=['GET'])
@@ -299,9 +331,15 @@ def black_keyword_search_result_download():
             if set(t_list) == set(search_tag):
                 parse_id_list.append(p_id)
         if not parse_id_list:
-            return render_template('search_result.html', data=[], total_pages=1, current_page=1,
-                                   tag_list=tag_list, search_keyword=search_keyword, search_tag=search_tag,
-                                   default_tag_id_list=default_tag_id_list,role_ids=RoleService.user_roles(session['current_user_id']))
+            # Return empty file for download
+            output = BytesIO()
+            df = pd.DataFrame([], columns=['关键词', 'URL', 'ACCOUNT', 'DESC', '标签'])
+            df.to_csv(output, index=False, encoding='utf-8')
+            output.seek(0)
+            response = make_response(output.getvalue())
+            response.headers["Content-Disposition"] = "attachment; filename=account.csv"
+            response.headers["Content-type"] = "text/csv"
+            return response
 
     query = KeywordSearchParseResult.query.filter(
         KeywordSearchParseResult.is_delete == KeywordSearchParseResult.DeleteType.NORMAL)
@@ -346,3 +384,128 @@ def black_keyword_search_result_download():
     response.headers["Content-type"] = "text/csv"
 
     return response
+
+
+# REST API endpoints for frontend integration
+@api.route('/black-keywords', methods=['GET'])
+def get_black_keywords():
+    """获取黑词列表 - REST API"""
+    args = request.args
+    page = get_or_exception('page', args, 'int', 1)
+    page_size = get_or_exception('page_size', args, 'int', 20)
+    offset = (page - 1) * page_size
+    
+    total_records = db.session.query(BlackKeyword).filter(
+        BlackKeyword.is_delete == BlackKeyword.DeleteType.NORMAL).count()
+    
+    total_pages = (total_records + page_size - 1) // page_size
+    rows = (db.session.query(BlackKeyword).filter(BlackKeyword.is_delete == BlackKeyword.DeleteType.NORMAL)
+            .order_by(BlackKeyword.id.desc()).offset(offset).limit(page_size).all())
+    
+    data = [{
+        'id': row.id,
+        'keyword': row.keyword,
+        'status': row.status,
+        'is_delete': row.is_delete,
+        'created_at': row.created_at.isoformat() if row.created_at else None,
+        'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+    } for row in rows]
+    
+    return success({
+        'data': data,
+        'total': total_records,
+        'page': page,
+        'page_size': page_size
+    })
+
+
+@api.route('/black-keywords', methods=['POST'])
+def create_black_keyword():
+    """创建黑词 - REST API"""
+    args = request.json
+    keyword = get_or_exception('keyword', args, 'str')
+    status = get_or_exception('status', args, 'int', 0)
+    
+    if not keyword.strip():
+        raise APIException('关键词不能为空')
+    
+    # 检查是否已存在
+    existing = db.session.query(BlackKeyword).filter(
+        BlackKeyword.keyword == keyword.strip(),
+        BlackKeyword.is_delete == BlackKeyword.DeleteType.NORMAL
+    ).first()
+    
+    if existing:
+        raise APIException('关键词已存在')
+    
+    black_keyword = BlackKeyword(keyword=keyword.strip(), status=status)
+    db.session.add(black_keyword)
+    db.session.commit()
+    
+    return success({
+        'id': black_keyword.id,
+        'keyword': black_keyword.keyword,
+        'status': black_keyword.status,
+        'is_delete': black_keyword.is_delete,
+        'created_at': black_keyword.created_at.isoformat() if black_keyword.created_at else None,
+        'updated_at': black_keyword.updated_at.isoformat() if black_keyword.updated_at else None,
+    })
+
+
+@api.route('/black-keywords/<int:keyword_id>', methods=['PUT'])
+def update_black_keyword(keyword_id):
+    """更新黑词 - REST API"""
+    args = request.json
+    keyword = get_or_exception('keyword', args, 'str')
+    status = get_or_exception('status', args, 'int')
+    
+    if not keyword.strip():
+        raise APIException('关键词不能为空')
+    
+    black_keyword = db.session.query(BlackKeyword).filter_by(
+        id=keyword_id, 
+        is_delete=BlackKeyword.DeleteType.NORMAL
+    ).first()
+    
+    if not black_keyword:
+        raise APIException('关键词不存在')
+    
+    # 检查是否与其他关键词重复
+    existing = db.session.query(BlackKeyword).filter(
+        BlackKeyword.keyword == keyword.strip(),
+        BlackKeyword.id != keyword_id,
+        BlackKeyword.is_delete == BlackKeyword.DeleteType.NORMAL
+    ).first()
+    
+    if existing:
+        raise APIException('关键词已存在')
+    
+    black_keyword.keyword = keyword.strip()
+    black_keyword.status = status
+    db.session.commit()
+    
+    return success({
+        'id': black_keyword.id,
+        'keyword': black_keyword.keyword,
+        'status': black_keyword.status,
+        'is_delete': black_keyword.is_delete,
+        'created_at': black_keyword.created_at.isoformat() if black_keyword.created_at else None,
+        'updated_at': black_keyword.updated_at.isoformat() if black_keyword.updated_at else None,
+    })
+
+
+@api.route('/black-keywords/<int:keyword_id>', methods=['DELETE'])
+def delete_black_keyword(keyword_id):
+    """删除黑词 - REST API"""
+    black_keyword = db.session.query(BlackKeyword).filter_by(
+        id=keyword_id,
+        is_delete=BlackKeyword.DeleteType.NORMAL
+    ).first()
+    
+    if not black_keyword:
+        raise APIException('关键词不存在')
+    
+    black_keyword.is_delete = BlackKeyword.DeleteType.DELETE
+    db.session.commit()
+    
+    return success(None)

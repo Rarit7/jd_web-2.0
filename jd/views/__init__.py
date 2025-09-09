@@ -47,6 +47,13 @@ def get_or_exception(key, args, ptype=None, default=None, err_msg=None):
             return float(value)
         elif ptype == "str":
             return str(value)
+        elif ptype == "bool":
+            if isinstance(value, bool):
+                return value
+            # 处理字符串形式的布尔值
+            if isinstance(value, str):
+                return value.lower() in ('true', '1', 'yes', 'on')
+            return bool(value)
         return value
     except Exception as e:
         logger.exception(e)

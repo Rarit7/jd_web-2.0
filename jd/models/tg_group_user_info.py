@@ -15,5 +15,6 @@ class TgGroupUserInfo(BaseModel):
     created_at = db.Column(db.DateTime, default=db.func.now())
     updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
     remark = db.Column(db.String(128), nullable=False, default='', comment='备注')
+    is_key_focus = db.Column(db.Boolean, nullable=False, default=False, comment='是否重点关注对象')
 
 

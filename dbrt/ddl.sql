@@ -315,14 +315,11 @@ CREATE TABLE `tg_group_user_info`
 CREATE TABLE `tg_user_info_change`
 (
     `id`              int          NOT NULL AUTO_INCREMENT,
-    `user_id`         varchar(128) NOT NULL DEFAULT '' COMMENT 'telegram用户id',
-    `username_before` varchar(128) NOT NULL DEFAULT '' COMMENT '变更前用户名',
-    `username_after`  varchar(128) NOT NULL DEFAULT '' COMMENT '变更后用户名',
-    `nickname_before` varchar(128) NOT NULL DEFAULT '' COMMENT '变更前昵称',
-    `nickname_after`  varchar(128) NOT NULL DEFAULT '' COMMENT '变更后昵称',
-    `change_type`     varchar(32)  NOT NULL DEFAULT '' COMMENT '变更类型',
-    `created_at`      datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`      datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `user_id`         varchar(128) NOT NULL DEFAULT '' COMMENT '用户id',
+    `changed_fields`  int          NOT NULL DEFAULT 0 COMMENT '变更字段(1-显示名称 2-用户名 3-头像 4-个人简介)',
+    `original_value`  text         DEFAULT NULL COMMENT '原信息',
+    `new_value`       text         DEFAULT NULL COMMENT '变更后信息',
+    `update_time`     datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '变更时间',
     PRIMARY KEY (`id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='tg用户信息变更记录';
@@ -330,13 +327,12 @@ CREATE TABLE `tg_user_info_change`
 -- TG群组信息变更记录表
 CREATE TABLE `tg_group_info_change`
 (
-    `id`               int          NOT NULL AUTO_INCREMENT,
-    `chat_id`          varchar(128) NOT NULL DEFAULT '' COMMENT '群聊id',
-    `group_name_before` varchar(128) NOT NULL DEFAULT '' COMMENT '变更前群组名',
-    `group_name_after`  varchar(128) NOT NULL DEFAULT '' COMMENT '变更后群组名',
-    `change_type`      varchar(32)  NOT NULL DEFAULT '' COMMENT '变更类型',
-    `created_at`       datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`       datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `id`              int          NOT NULL AUTO_INCREMENT,
+    `chat_id`         varchar(128) NOT NULL DEFAULT '' COMMENT '群聊id',
+    `changed_fields`  int          NOT NULL DEFAULT 0 COMMENT '变更字段(1-显示名称 2-群组名/邀请链接 3-群头像 4-群组简介)',
+    `original_value`  text         DEFAULT NULL COMMENT '原信息',
+    `new_value`       text         DEFAULT NULL COMMENT '变更后信息',
+    `update_time`     datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '变更时间',
     PRIMARY KEY (`id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='tg群组信息变更记录';

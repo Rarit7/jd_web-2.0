@@ -192,12 +192,12 @@ class TelegramAPIs(object):
             if lock_file:
                 lock_file.close()
             
-            # 实现指数退避重试策略，减少日志噪音
-            max_retries = 3
-            base_delay = 3.0
+            # 实现固定间隔重试策略，减少日志噪音
+            max_retries = 5
+            retry_interval = 60.0  # 1分钟间隔
             
             for retry_count in range(max_retries):
-                wait_time = base_delay * (2 ** retry_count)  # 指数退避: 3s, 6s, 12s
+                wait_time = retry_interval  # 固定1分钟间隔
                 
                 if retry_count == 0:
                     logger.info(f"Session文件 {session_name} 被占用，等待 {wait_time:.1f}s 后重试")
@@ -247,7 +247,8 @@ class TelegramAPIs(object):
                     raise inner_e
             
             # 所有重试都失败了
-            logger.error(f"Session文件 {session_name} 在 {max_retries} 次重试后仍被占用，初始化失败")
+            total_wait_time = max_retries * retry_interval
+            logger.error(f"Session文件 {session_name} 在 {max_retries} 次重试({total_wait_time/60:.0f}分钟)后仍被占用，初始化失败")
             return False
             
         except Exception as e:

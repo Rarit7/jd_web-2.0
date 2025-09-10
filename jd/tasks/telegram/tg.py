@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 @celery.task
-@with_session_lock(max_wait_seconds=180, check_interval=3)
+@with_session_lock(max_retries=5, check_interval=60)
 async def fetch_group_user_info(chat_id, user_id, nick_name, username, sessionname):
     """
     获取群组用户的信息
@@ -123,7 +123,7 @@ async def fetch_group_user_info(chat_id, user_id, nick_name, username, sessionna
 
 
 @celery.task
-@with_session_lock(max_wait_seconds=300, check_interval=5)
+@with_session_lock(max_retries=5, check_interval=60)
 async def fetch_group_recent_user_info(sessionname):
     tg = await TgService.init_tg(sessionname)
     try:

@@ -45,11 +45,46 @@ done
 # 更新代码到最新版本
 echo "正在从远程仓库拉取最新代码..."
 git fetch origin
+
+# 检查是否有需要特殊处理的文件冲突
+echo "检查本地文件状态..."
+
+# 暂存本地的 vite.config.ts 等配置文件，避免冲突
+STASH_FILES=""
+if [ -f "frontend/vite.config.ts" ]; then
+    if ! git ls-files --error-unmatch frontend/vite.config.ts >/dev/null 2>&1; then
+        STASH_FILES="$STASH_FILES frontend/vite.config.ts"
+    fi
+fi
+
+if [ ! -z "$STASH_FILES" ]; then
+    echo "暂存本地配置文件: $STASH_FILES"
+    # 使用 git stash 暂存工作目录中被忽略但会冲突的文件
+    git add $STASH_FILES 2>/dev/null || true
+    git stash push -m "Auto-stash local config files before update" 2>/dev/null || true
+fi
+
+# 执行更新
 git pull origin main
 if [ $? -eq 0 ]; then
-  echo "代码更新成功"
+    echo "代码更新成功"
+    
+    # 恢复暂存的配置文件
+    if [ ! -z "$STASH_FILES" ]; then
+        echo "恢复本地配置文件..."
+        git stash pop 2>/dev/null || true
+        # 确保配置文件不被追踪
+        git reset HEAD $STASH_FILES 2>/dev/null || true
+    fi
 else
-  echo "警告: 代码更新失败，继续使用本地版本"
+    echo "警告: 代码更新失败，继续使用本地版本"
+    
+    # 如果更新失败，也要尝试恢复配置文件
+    if [ ! -z "$STASH_FILES" ]; then
+        echo "恢复本地配置文件..."
+        git stash pop 2>/dev/null || true
+        git reset HEAD $STASH_FILES 2>/dev/null || true
+    fi
 fi
 
 # 加载 conda 初始化脚本

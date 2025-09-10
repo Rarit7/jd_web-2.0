@@ -195,6 +195,7 @@ frontend/dist-ssr/
 # Development files
 frontend/.vite/
 frontend/.DS_Store
+frontend/vite.config.ts
 
 # Environment variables
 frontend/.env

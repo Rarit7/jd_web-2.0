@@ -133,6 +133,7 @@ class TelegramAPIs(object):
         """
         self.client = None
         self.download_manager = None
+        self.session_lock_file = None
 
     async def init_client(self, session_name, api_id, api_hash, proxy=None):
         """
@@ -144,31 +145,69 @@ class TelegramAPIs(object):
             api_hash (str): Telegram API Hash
             proxy (tuple, optional): 代理配置，格式为(协议, IP, 端口)
         """
-        # 处理proxy参数
-        client_kwargs = {}
-        if proxy:
-            client_kwargs['proxy'] = proxy
+        import asyncio
+        import fcntl
+        import os
+        
+        # 创建session文件锁，防止多进程同时访问
+        lock_file_path = f"{session_name}.lock"
+        lock_file = None
+        
+        try:
+            # 尝试获取文件锁
+            lock_file = open(lock_file_path, 'w')
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            logger.info(f"获取session文件锁成功: {lock_file_path}")
             
-        # 设置Telethon日志等级为WARNING，减少冗余日志输出
-        logging.getLogger('telethon').setLevel(logging.WARNING)
-        
-        self.client = TelegramClient(session_name, api_id, api_hash, **client_kwargs)
-        
-        # 连接并启动客户端
-        await self.client.connect()
-        if not await self.client.is_user_authorized():
-            logger.error(f"Session {session_name} 未授权，需要重新登录")
-            return False
-        
-        # 初始化下载管理器
-        self.download_manager = TelegramDownloadManager(self.client)
-        return True
+            # 处理proxy参数
+            client_kwargs = {}
+            if proxy:
+                client_kwargs['proxy'] = proxy
+                
+            # 设置Telethon日志等级为WARNING，减少冗余日志输出
+            logging.getLogger('telethon').setLevel(logging.WARNING)
+            
+            # 禁用Telethon的自动保存以减少文件操作冲突
+            client_kwargs['device_model'] = 'Server'
+            client_kwargs['system_version'] = '1.0'
+            client_kwargs['app_version'] = '1.0'
+            client_kwargs['lang_code'] = 'en'
+            client_kwargs['auto_reconnect'] = False  # 禁用自动重连
+            
+            self.client = TelegramClient(session_name, api_id, api_hash, **client_kwargs)
+            self.session_lock_file = lock_file  # 保存锁文件引用
+            
+            # 连接并启动客户端
+            await self.client.connect()
+            if not await self.client.is_user_authorized():
+                logger.error(f"Session {session_name} 未授权，需要重新登录")
+                return False
+            
+            # 初始化下载管理器
+            self.download_manager = TelegramDownloadManager(self.client)
+            logger.info(f"Telegram客户端初始化成功: {session_name}")
+            return True
+            
+        except BlockingIOError:
+            logger.warning(f"Session文件 {session_name} 正在被其他进程使用，稍后重试")
+            if lock_file:
+                lock_file.close()
+            
+            # 等待一段时间后重试
+            await asyncio.sleep(2)
+            return await self.init_client(session_name, api_id, api_hash, proxy)
+            
+        except Exception as e:
+            logger.error(f"Telegram客户端初始化失败: {e}")
+            if lock_file:
+                lock_file.close()
+            raise e
 
 
     async def close_client(self):
         """
         关闭Telegram客户端连接
-        释放网络资源，防止session文件锁定
+        释放网络资源和文件锁
         """
         if self.client:
             try:
@@ -177,10 +216,23 @@ class TelegramAPIs(object):
                 # 等待一小段时间确保连接完全关闭
                 import asyncio
                 await asyncio.sleep(0.1)
+                logger.info('Telegram客户端连接已关闭')
             except Exception as e:
                 logger.error(f'关闭Telegram客户端时发生错误: {e}')
             finally:
                 self.client = None
+        
+        # 释放session文件锁
+        if hasattr(self, 'session_lock_file') and self.session_lock_file:
+            try:
+                import fcntl
+                fcntl.flock(self.session_lock_file.fileno(), fcntl.LOCK_UN)
+                self.session_lock_file.close()
+                logger.info('Session文件锁已释放')
+            except Exception as lock_error:
+                logger.warning(f'释放session文件锁时发生错误: {lock_error}')
+            finally:
+                self.session_lock_file = None
 
     def _ensure_directory(self, path):
         """

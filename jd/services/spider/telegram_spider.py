@@ -189,13 +189,66 @@ class TelegramAPIs(object):
             return True
             
         except BlockingIOError:
-            logger.warning(f"Session文件 {session_name} 正在被其他进程使用，稍后重试")
             if lock_file:
                 lock_file.close()
             
-            # 等待一段时间后重试
-            await asyncio.sleep(2)
-            return await self.init_client(session_name, api_id, api_hash, proxy)
+            # 实现指数退避重试策略，减少日志噪音
+            max_retries = 3
+            base_delay = 3.0
+            
+            for retry_count in range(max_retries):
+                wait_time = base_delay * (2 ** retry_count)  # 指数退避: 3s, 6s, 12s
+                
+                if retry_count == 0:
+                    logger.info(f"Session文件 {session_name} 被占用，等待 {wait_time:.1f}s 后重试")
+                else:
+                    logger.debug(f"Session文件 {session_name} 重试 {retry_count + 1}/{max_retries}，等待 {wait_time:.1f}s")
+                
+                await asyncio.sleep(wait_time)
+                
+                # 尝试重新获取锁
+                try:
+                    lock_file = open(lock_file_path, 'w')
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    logger.info(f"Session文件锁获取成功: {lock_file_path} (重试 {retry_count + 1} 次后)")
+                    
+                    # 继续初始化客户端的逻辑
+                    client_kwargs = {}
+                    if proxy:
+                        client_kwargs['proxy'] = proxy
+                        
+                    logging.getLogger('telethon').setLevel(logging.WARNING)
+                    client_kwargs['device_model'] = 'Server'
+                    client_kwargs['system_version'] = '1.0'
+                    client_kwargs['app_version'] = '1.0'
+                    client_kwargs['lang_code'] = 'en'
+                    client_kwargs['auto_reconnect'] = False
+                    
+                    self.client = TelegramClient(session_name, api_id, api_hash, **client_kwargs)
+                    self.session_lock_file = lock_file
+                    
+                    await self.client.connect()
+                    if not await self.client.is_user_authorized():
+                        logger.error(f"Session {session_name} 未授权，需要重新登录")
+                        return False
+                    
+                    self.download_manager = TelegramDownloadManager(self.client)
+                    logger.info(f"Telegram客户端初始化成功: {session_name}")
+                    return True
+                    
+                except BlockingIOError:
+                    if lock_file:
+                        lock_file.close()
+                    continue  # 继续下一次重试
+                except Exception as inner_e:
+                    logger.error(f"重试过程中发生错误: {inner_e}")
+                    if lock_file:
+                        lock_file.close()
+                    raise inner_e
+            
+            # 所有重试都失败了
+            logger.error(f"Session文件 {session_name} 在 {max_retries} 次重试后仍被占用，初始化失败")
+            return False
             
         except Exception as e:
             logger.error(f"Telegram客户端初始化失败: {e}")

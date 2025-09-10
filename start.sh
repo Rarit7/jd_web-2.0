@@ -42,6 +42,16 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+# 更新代码到最新版本
+echo "正在从远程仓库拉取最新代码..."
+git fetch origin
+git pull origin main
+if [ $? -eq 0 ]; then
+  echo "代码更新成功"
+else
+  echo "警告: 代码更新失败，继续使用本地版本"
+fi
+
 # 加载 conda 初始化脚本
 echo "加载 conda 初始化脚本"
 # export PATH="/home/ubuntu/miniconda3"

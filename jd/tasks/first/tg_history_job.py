@@ -15,8 +15,8 @@ class TgHistoryTask(AsyncBaseTask):
         # 这个任务是全局性的历史获取，不针对特定资源
         # 但可能需要指定session来避免冲突
         super().__init__(resource_id='', session_id=session_name or 'global_history')
-        # 设置冲突处理策略：同名任务运行时直接返回，避免重复执行
-        self.wait_if_conflict = False
+        # 设置冲突处理策略：同名任务或session冲突时排队等待，避免session争抢
+        self.wait_if_conflict = True
     
     def get_job_name(self) -> str:
         return 'update_group_history'

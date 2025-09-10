@@ -16,6 +16,7 @@ from jd.models.tg_group_chat_history import TgGroupChatHistory
 from jd.models.tg_group_user_info import TgGroupUserInfo
 from jd.services.spider.telegram_spider import TelegramSpider, TelegramAPIs
 from jd.services.spider.tg import TgService
+from jd.tasks.telegram.session_lock import with_session_lock
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 @celery.task
+@with_session_lock(max_wait_seconds=180, check_interval=3)
 async def fetch_group_user_info(chat_id, user_id, nick_name, username, sessionname):
     """
     获取群组用户的信息
@@ -121,6 +123,7 @@ async def fetch_group_user_info(chat_id, user_id, nick_name, username, sessionna
 
 
 @celery.task
+@with_session_lock(max_wait_seconds=300, check_interval=5)
 async def fetch_group_recent_user_info(sessionname):
     tg = await TgService.init_tg(sessionname)
     try:

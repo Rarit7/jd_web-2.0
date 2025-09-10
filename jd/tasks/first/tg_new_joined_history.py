@@ -18,8 +18,8 @@ class NewGroupHistoryTask(AsyncBaseTask):
         self.group_name = group_name
         self.chat_id = chat_id
         
-        # 先不设置默认的wait_if_conflict，后面会根据冲突类型动态决定
-        self.wait_if_conflict = False
+        # 设置冲突处理策略：session冲突时排队等待，避免session争抢
+        self.wait_if_conflict = True
     
     def get_job_name(self) -> str:
         return 'fetch_new_group_history'

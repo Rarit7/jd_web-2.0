@@ -13,8 +13,10 @@ class TgHistoryTask(AsyncBaseTask):
     
     def __init__(self, session_name: str = None):
         # 这个任务是全局性的历史获取，不针对特定资源
-        # 但可能需要指定session来避免冲突
-        super().__init__(resource_id='', session_id=session_name or 'global_history')
+        # 但需要使用实际的session来避免与其他Telegram任务冲突
+        # 如果没有指定session，使用常用的默认session名称，确保能与其他任务正确排队
+        actual_session = session_name or 'default2'  # 使用实际的session名称而非虚拟名称
+        super().__init__(resource_id='', session_id=actual_session)
         # 设置冲突处理策略：同名任务或session冲突时排队等待，避免session争抢
         self.wait_if_conflict = True
     

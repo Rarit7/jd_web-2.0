@@ -147,7 +147,7 @@ class ExsitedGroupHistoryFetcher(BaseTgHistoryFetcher):
         chat_room_list = self.get_chat_room_list()
         if not chat_room_list:
             logger.info('增量聊天记录获取|没有找到群组')
-            return False, {'total_groups': 0, 'processed_groups': [], 'error_groups': []}
+            return True, {'total_groups': 0, 'processed_groups': [], 'error_groups': [], 'success_count': 0, 'error_count': 0}
             
         success_count = 0
         current_session_names = None

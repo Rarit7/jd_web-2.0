@@ -16,6 +16,22 @@ class JobQueueLog(db.Model):
     created_at = db.Column(db.DateTime, default=db.func.now())
     updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
 
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'resource_id': self.resource_id,
+            'session_name': self.session_name,
+            'status': self.status,
+            'priority': self.priority,
+            'timeout_at': self.timeout_at.isoformat() if self.timeout_at else None,
+            'extra_params': self.extra_params,
+            'result': self.result,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
     class StatusType:
         NOT_START = 0
         RUNNING = 1

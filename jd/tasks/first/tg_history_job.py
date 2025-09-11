@@ -124,7 +124,7 @@ class TgHistoryTask(AsyncBaseTask):
                 return {
                     'has_conflict': True,
                     'type': 'telegram_global',
-                    'task': task,
+                    'task': task.to_dict(),
                     'message': f'Telegram任务 {task.name} (ID:{task.id}) 正在运行'
                 }
         
@@ -154,7 +154,24 @@ class TgHistoryTask(AsyncBaseTask):
             else:
                 duration_text = f"{duration:.1f}秒"
         else:
-            duration_text = "未知"
+            # 如果没有duration或为0，尝试从payload获取时间信息
+            start_time_str = payload.get('start_time')
+            end_time_str = payload.get('end_time')
+            if start_time_str and end_time_str:
+                try:
+                    import datetime
+                    from dateutil import parser
+                    start_time = parser.parse(start_time_str)
+                    end_time = parser.parse(end_time_str)
+                    calculated_duration = (end_time - start_time).total_seconds()
+                    if calculated_duration >= 60:
+                        duration_text = f"{calculated_duration/60:.1f}分钟"
+                    else:
+                        duration_text = f"{calculated_duration:.1f}秒"
+                except Exception:
+                    duration_text = "未知"
+            else:
+                duration_text = "未知"
         
         # 提取群组和消息统计
         total_groups = stats.get('total_groups', 0)
@@ -184,7 +201,18 @@ class TgHistoryTask(AsyncBaseTask):
             
             return "，".join(result_parts)
         else:
-            return f"任务成功，无群组处理，耗时 {duration_text}"
+            # 尝试从payload中获取更多信息
+            status = payload.get('status', 'unknown')
+            success = payload.get('success', False)
+            
+            if status == 'completed' and success:
+                # 任务完成但没有统计信息，可能是因为没有群组需要处理
+                return f"任务完成，无群组需要处理，耗时 {duration_text}"
+            elif status == 'failed':
+                error_msg = payload.get('err_msg', '未知错误')
+                return f"任务失败：{error_msg}，耗时 {duration_text}"
+            else:
+                return f"任务成功，无群组处理，耗时 {duration_text}"
     
     async def execute_async_task(self) -> Dict[str, Any]:
         """执行Telegram历史获取任务"""
@@ -201,7 +229,12 @@ class TgHistoryTask(AsyncBaseTask):
             success, stats = await fetcher.process_all_groups()
             end_time = datetime.datetime.now(ZoneInfo('UTC'))
             
-            if success:
+            # 检查是否有任何成功处理的群组
+            success_count = stats.get('success_count', 0) if stats else 0
+            total_groups = stats.get('total_groups', 0) if stats else 0
+            
+            if success or success_count > 0 or total_groups == 0:
+                # 任务成功：要么明确成功，要么有成功处理的群组，要么没有群组需要处理
                 logger.info('Telegram聊天历史获取任务完成')
                 return {
                     'err_code': 0,
@@ -213,14 +246,17 @@ class TgHistoryTask(AsyncBaseTask):
                         'end_time': end_time.isoformat(),
                         'duration_seconds': (end_time - start_time).total_seconds(),
                         'session_name': self.session_id,
-                        'statistics': stats
+                        'statistics': stats or {}
                     }
                 }
             else:
-                logger.warning('Telegram聊天历史获取任务未成功完成')
+                # 任务失败：没有成功处理任何群组
+                error_count = stats.get('error_count', 0) if stats else 0
+                error_msg = f'Telegram聊天历史获取任务失败，{error_count}/{total_groups} 个群组处理失败'
+                logger.warning(error_msg)
                 return {
                     'err_code': 1,
-                    'err_msg': 'Telegram聊天历史获取任务未成功完成',
+                    'err_msg': error_msg,
                     'payload': {
                         'status': 'failed',
                         'success': False,
@@ -228,7 +264,7 @@ class TgHistoryTask(AsyncBaseTask):
                         'end_time': end_time.isoformat(),
                         'duration_seconds': (end_time - start_time).total_seconds(),
                         'session_name': self.session_id,
-                        'statistics': stats
+                        'statistics': stats or {}
                     }
                 }
                 

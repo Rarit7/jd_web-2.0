@@ -5,10 +5,17 @@ usage() {
   echo "Usage: $0 [options]"
   echo "Options:"
   echo "  -w              启动web"
-  echo "  -c                启动Celery 服务"
+  echo "  -c              启动Celery 服务"
   echo "  -f              启动前端开发服务器"
   echo "  -a              执行所有启动（包括前端）"
-  echo "  -h             显示帮助信息"
+  echo "  -q              清理搜索队列（标记所有待处理任务为完成）"
+  echo "  -h              显示帮助信息"
+  echo ""
+  echo "示例:"
+  echo "  $0 -q           # 仅清理搜索队列"
+  echo "  $0 -a           # 启动所有服务"
+  echo "  $0 -a -q        # 清理搜索队列后启动所有服务"
+  echo "  $0 -w -c -q     # 清理搜索队列后启动web和Celery服务"
   exit 1
 }
 
@@ -31,6 +38,10 @@ while [[ $# -gt 0 ]]; do
       web=true
       celery_flag=true
       frontend=true
+      shift
+      ;;
+    -q)
+      queue_cleanup=true
       shift
       ;;
     -h)
@@ -95,6 +106,17 @@ eval "$(conda shell.bash hook)"
 # 激活 conda 环境
 echo "激活环境: sdweb2"
 conda activate sdweb2
+
+# 搜索队列清理
+if [ "${queue_cleanup}" = "true" ]; then
+  echo "开始清理搜索队列中的待处理任务..."
+  python scripts/complete_search_queue.py --execute
+  if [ $? -eq 0 ]; then
+    echo "搜索队列清理完成"
+  else
+    echo "警告: 搜索队列清理失败"
+  fi
+fi
 
 # celery
 if [ "${celery_flag}" = "true" ]; then

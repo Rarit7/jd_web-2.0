@@ -5,21 +5,21 @@
     direction="rtl"
     size="400px"
   >
-    <div v-if="userDetail" class="user-detail-drawer">
+    <div v-if="currentUserDetail" class="user-detail-drawer" v-loading="userDetailLoading">
       <!-- 用户头像和基本信息 -->
       <div class="user-basic-info">
         <div class="user-avatar-large">
-          <el-avatar :size="80" :src="userDetail.avatar" shape="square">
-            <span>{{ userDetail.senderName.charAt(0) }}</span>
+          <el-avatar :size="80" :src="currentUserDetail.avatar" shape="square">
+            <span>{{ currentUserDetail.senderName.charAt(0) }}</span>
           </el-avatar>
         </div>
         <div class="user-name-info">
-          <h3 class="user-name" :class="{ 'key-focus': userDetail.is_key_focus }">
-            {{ userDetail.senderName }}
+          <h3 class="user-name" :class="{ 'key-focus': currentUserDetail.is_key_focus }">
+            {{ currentUserDetail.senderName }}
           </h3>
-          <p class="user-id">ID: {{ userDetail.user_id }}</p>
-          <p class="username" v-if="userDetail.username">
-            @{{ userDetail.username }}
+          <p class="user-id">ID: {{ currentUserDetail.user_id }}</p>
+          <p class="username" v-if="currentUserDetail.username">
+            @{{ currentUserDetail.username }}
           </p>
         </div>
       </div>
@@ -59,8 +59,8 @@
           <div class="placeholder-item bio-item">
             <span class="label">个人简介:</span>
             <div class="bio-content">
-              <div v-if="userDetail.bio" class="bio-text">
-                {{ userDetail.bio }}
+              <div v-if="localUserBio || currentUserDetail.bio" class="bio-text">
+                {{ localUserBio || currentUserDetail.bio }}
               </div>
               <div v-else class="bio-empty">
                 暂无个人简介
@@ -260,10 +260,11 @@ interface UserGroup {
   lastActiveTime: string
 }
 
-// 定义组件props
+// 定义组件props - 支持两种模式：完整用户信息或仅user_id
 interface Props {
   visible: boolean
-  userDetail: UserInfo | null
+  userDetail?: UserInfo | null  // 可选：完整用户信息
+  userId?: string              // 可选：仅用户ID，组件自己加载详细信息
   currentGroupId?: string
 }
 
@@ -301,22 +302,57 @@ const userStats = ref<UserStats>({
 const groupsLoading = ref(false)
 const userGroups = ref<UserGroup[]>([])
 
+// 本地维护用户信息，确保响应式更新
+const localUserBio = ref('')
+const localUserDetail = ref<UserInfo | null>(null)
+const userDetailLoading = ref(false)
+
 // 双向绑定visible属性
 const isVisible = computed({
   get: () => props.visible,
   set: (value: boolean) => emit('update:visible', value)
 })
 
-// 监听用户详情变化，加载相关数据
-watch(() => props.userDetail, (newUserDetail) => {
-  if (newUserDetail) {
-    localRemark.value = newUserDetail.remark || ''
-    localKeyFocus.value = newUserDetail.is_key_focus || false
-    loadUserStats()
-    loadUserTags()
-    loadUserGroups()
-  }
-}, { immediate: true })
+// 计算当前有效的用户详情
+const currentUserDetail = computed(() => {
+  return localUserDetail.value || props.userDetail
+})
+
+// 监听props变化，加载用户数据
+watch([() => props.userDetail, () => props.userId, () => props.visible], 
+  async ([newUserDetail, newUserId, visible]) => {
+    if (!visible) return
+    
+    if (newUserDetail) {
+      // 模式1：已提供完整用户信息
+      console.log('使用提供的用户详情:', newUserDetail)
+      localUserDetail.value = newUserDetail
+      localRemark.value = newUserDetail.remark || ''
+      localKeyFocus.value = newUserDetail.is_key_focus || false
+      localUserBio.value = newUserDetail.bio || ''
+      
+      // 如果没有bio，尝试加载完整信息
+      if (!newUserDetail.bio && newUserDetail.user_id) {
+        await loadCompleteUserInfo(newUserDetail.user_id)
+      }
+    } else if (newUserId) {
+      // 模式2：仅提供user_id，需要加载完整信息
+      console.log('仅提供user_id，加载完整信息:', newUserId)
+      await loadCompleteUserInfo(newUserId)
+    } else {
+      localUserDetail.value = null
+      return
+    }
+    
+    // 加载相关数据
+    if (currentUserDetail.value) {
+      loadUserStats()
+      loadUserTags()
+      loadUserGroups()
+    }
+  }, 
+  { immediate: true }
+)
 
 // 格式化日期
 const formatDate = (dateString: string): string => {
@@ -344,7 +380,8 @@ const startEditRemark = async () => {
 }
 
 const saveRemark = async () => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   try {
     // 获取当前用户标签ID列表
@@ -352,7 +389,7 @@ const saveRemark = async () => {
     
     // 调用API保存备注和标签
     await tgUsersApi.updateUser({
-      tg_user_id: props.userDetail.id,
+      tg_user_id: userDetail.id,
       tag_id_list: tagIds,
       remark: tempRemark.value
     })
@@ -373,18 +410,19 @@ const cancelEditRemark = () => {
 
 // 处理重点关注开关
 const handleFocusToggle = async (value: boolean) => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   focusLoading.value = true
   try {
     // 调用API更新重点关注状态
-    const response = await tgUsersApi.toggleFocus(props.userDetail.id)
+    const response = await tgUsersApi.toggleFocus(userDetail.id)
     
     if (response.data.err_code === 0) {
       // 更新本地状态
       localKeyFocus.value = response.data.payload.is_key_focus
-      if (props.userDetail) {
-        props.userDetail.is_key_focus = response.data.payload.is_key_focus
+      if (localUserDetail.value) {
+        localUserDetail.value.is_key_focus = response.data.payload.is_key_focus
       }
       ElMessage.success(response.data.payload.message)
     } else {
@@ -431,7 +469,8 @@ const loadAvailableTags = async () => {
 
 // 添加标签给用户
 const addTagToUser = async (tag: Tag) => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   try {
     // 获取当前用户所有标签ID
@@ -440,7 +479,7 @@ const addTagToUser = async (tag: Tag) => {
     
     // 调用API更新用户标签
     await tgUsersApi.updateUser({
-      tg_user_id: props.userDetail.id,
+      tg_user_id: userDetail.id,
       tag_id_list: newTagIds.join(','),
       remark: localRemark.value || ''
     })
@@ -462,7 +501,8 @@ const addTagToUser = async (tag: Tag) => {
 
 // 从用户删除标签
 const removeTag = async (tag: Tag) => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   try {
     // 获取删除该标签后的标签ID列表
@@ -472,7 +512,7 @@ const removeTag = async (tag: Tag) => {
     
     // 调用API更新用户标签
     await tgUsersApi.updateUser({
-      tg_user_id: props.userDetail.id,
+      tg_user_id: userDetail.id,
       tag_id_list: remainingTagIds.join(','),
       remark: localRemark.value || ''
     })
@@ -499,11 +539,12 @@ const removeTag = async (tag: Tag) => {
 
 // 加载用户统计数据
 const loadUserStats = async () => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   statsLoading.value = true
   try {
-    const response = await chatHistoryApi.getUserStats(props.userDetail.user_id)
+    const response = await chatHistoryApi.getUserStats(userDetail.user_id)
     
     if (response.data.err_code === 0) {
       const stats = response.data.payload
@@ -526,11 +567,12 @@ const loadUserStats = async () => {
 
 // 加载用户标签
 const loadUserTags = async () => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   try {
     // 从用户详情获取标签信息
-    if (props.userDetail.remark && props.userDetail.id) {
+    if (userDetail.remark && userDetail.id) {
       // 先获取完整的用户信息，包括标签
       const response = await tgUsersApi.getList({
         keyword: '',
@@ -542,7 +584,7 @@ const loadUserTags = async () => {
       
       if (response.data.err_code === 0) {
         // 找到当前用户
-        const currentUser = response.data.payload.data.find((user: any) => user.id === props.userDetail?.id)
+        const currentUser = response.data.payload.data.find((user: any) => user.id === userDetail.id)
         if (currentUser && currentUser.tag_id_list) {
           // 获取标签库中的所有标签
           const tagsResponse = await tagsApi.getList()
@@ -560,11 +602,12 @@ const loadUserTags = async () => {
 
 // 加载用户所在群组
 const loadUserGroups = async () => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   groupsLoading.value = true
   try {
-    const response = await chatHistoryApi.getUserStats(props.userDetail.user_id)
+    const response = await chatHistoryApi.getUserStats(userDetail.user_id)
     
     if (response.data.err_code === 0) {
       const stats = response.data.payload
@@ -585,14 +628,64 @@ const loadUserGroups = async () => {
   }
 }
 
+// 加载完整用户信息的统一函数
+const loadCompleteUserInfo = async (user_id: string) => {
+  if (!user_id) {
+    console.log('loadCompleteUserInfo: user_id 为空')
+    return
+  }
+  
+  userDetailLoading.value = true
+  console.log('loadCompleteUserInfo 开始加载:', user_id)
+  
+  try {
+    const response = await tgUsersApi.getUserByUserId(user_id)
+    console.log('API响应:', response.data)
+    
+    if (response.data.err_code === 0) {
+      const userData = response.data.payload
+      console.log('找到用户数据:', userData)
+      
+      // 构建标准的UserInfo对象
+      const userInfo: UserInfo = {
+        id: userData.id,
+        senderName: userData.nickname || userData.first_name || userData.username || '未知',
+        nickname: userData.nickname || '',
+        username: userData.username || '',
+        user_id: userData.user_id,
+        avatar: userData.avatar ? `/static/${userData.avatar}` : '',
+        is_key_focus: userData.is_key_focus || false,
+        bio: userData.bio || '',
+        remark: userData.notes || '',
+        chat_id: userData.chat_id
+      }
+      
+      // 更新本地状态
+      localUserDetail.value = userInfo
+      localUserBio.value = userInfo.bio
+      localRemark.value = userInfo.remark
+      localKeyFocus.value = userInfo.is_key_focus
+      
+      console.log(`✅ 成功获取用户 ${user_id} 的完整信息`)
+    } else {
+      console.log(`❌ 未找到用户 ${user_id}:`, response.data.err_msg)
+    }
+  } catch (error) {
+    console.error('加载用户完整信息失败:', error)
+  } finally {
+    userDetailLoading.value = false
+  }
+}
+
 // 导航到用户在指定群组的消息记录
 const navigateToUserMessages = (group: UserGroup) => {
-  if (!props.userDetail) return
+  const userDetail = currentUserDetail.value
+  if (!userDetail) return
   
   // 触发父组件事件，实现页面内导航
   emit('navigate-to-user-messages', {
     groupId: group.chat_id,
-    userId: props.userDetail.user_id
+    userId: userDetail.user_id
   })
   
   // 关闭抽屉

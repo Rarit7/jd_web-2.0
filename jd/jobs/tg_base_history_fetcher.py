@@ -61,6 +61,8 @@ class BaseTgHistoryFetcher:
             logger.error(f'Session列表：{sessionnames} Telegram服务初始化失败')
             return False
         self.user_processor = TgUserInfoProcessor(self.tg)
+        # 清空用户处理器的缓存
+        self.user_processor.clear_batch_cache()
         logger.info(f'Telegram服务初始化成功，使用session列表: {sessionnames}')
         return True
     
@@ -197,6 +199,17 @@ class BaseTgHistoryFetcher:
     
     async def process_message_batch(self, batch_messages, chat_id: int, batch_num: int) -> int:
         """处理消息批次，返回保存的消息数量"""
+        if not batch_messages:
+            return 0
+        
+        # 批量预处理用户信息缓存
+        if self.user_processor:
+            try:
+                await self.user_processor.prepare_batch_user_cache(batch_messages, chat_id)
+                logger.debug(f'第 {batch_num} 批次用户缓存预处理完成，消息数={len(batch_messages)}')
+            except Exception as e:
+                logger.error(f'批量用户缓存预处理失败: {e}')
+        
         batch_saved_count = 0
         for data in batch_messages:
             if await self._save_chat_message(data, chat_id):

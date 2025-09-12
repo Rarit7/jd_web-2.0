@@ -77,5 +77,12 @@ export const tgUsersApi = {
     return request.get('/tg/group_user/key_focus', { 
       params: { ...params, format: 'json' }
     })
+  },
+
+  // 根据user_id获取用户信息
+  getUserByUserId(user_id: string) {
+    return request.get('/tg/group_user/by_user_id', {
+      params: { user_id }
+    })
   }
 }

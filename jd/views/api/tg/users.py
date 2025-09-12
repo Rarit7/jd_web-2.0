@@ -48,11 +48,13 @@ def tg_group_user_list():
         if remark:
             query = query.filter(TgGroupUserInfo.remark.like(f'%{remark}%'))
         if keyword:
-            # 关键字搜索：昵称、用户名、备注
+            # 关键字搜索：昵称、用户名、备注、用户ID
             keyword_condition = or_(
                 TgGroupUserInfo.nickname.like(f'%{keyword}%'),
                 TgGroupUserInfo.username.like(f'%{keyword}%'),
-                TgGroupUserInfo.remark.like(f'%{keyword}%')
+                TgGroupUserInfo.remark.like(f'%{keyword}%'),
+                TgGroupUserInfo.user_id.like(f'%{keyword}%'),
+                TgGroupUserInfo.user_id == keyword  # 精确匹配数字类型的user_id
             )
             query = query.filter(keyword_condition)
         
@@ -263,6 +265,68 @@ def tg_group_user_toggle_focus():
         }), 500
 
 
+@api.route('/tg/group_user/by_user_id', methods=['GET'])
+def get_user_by_user_id():
+    """根据user_id获取用户信息"""
+    args = request.args
+    user_id = get_or_exception('user_id', args, 'str')
+    
+    try:
+        # 直接根据user_id查询，返回第一个匹配的记录
+        user_record = TgGroupUserInfo.query.filter_by(user_id=user_id).first()
+        
+        if not user_record:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': f'未找到user_id为{user_id}的用户',
+                'payload': {}
+            })
+        
+        # 获取标签信息
+        tag_list = TagService.list()
+        chat_room = TgGroup.query.filter_by(status=TgGroup.StatusType.JOIN_SUCCESS).all()
+        chat_room = {r.chat_id: r.name for r in chat_room}
+        
+        parse_tag_list = TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id == user_record.id).all()
+        tag_ids = [str(p.tag_id) for p in parse_tag_list]
+        tag_dict = {t['id']: t['name'] for t in tag_list}
+        tag_text = ','.join([tag_dict.get(int(t), '') for t in tag_ids if tag_dict.get(int(t), '')])
+        
+        user_data = {
+            'id': user_record.id,
+            'user_id': str(user_record.user_id),
+            'username': user_record.username or '',
+            'first_name': user_record.nickname or '',
+            'last_name': '',
+            'nickname': user_record.nickname or '',
+            'avatar': user_record.avatar_path or '',
+            'phone': '',
+            'bio': user_record.desc or '',
+            'notes': user_record.remark or '',
+            'tags': tag_text,
+            'tag_id_list': ','.join(tag_ids) if tag_ids else '',
+            'status': 'active',
+            'last_seen': user_record.updated_at.strftime('%Y-%m-%d %H:%M:%S') if user_record.updated_at else '',
+            'created_at': user_record.created_at.strftime('%Y-%m-%d %H:%M:%S') if user_record.created_at else '',
+            'updated_at': user_record.updated_at.strftime('%Y-%m-%d %H:%M:%S') if user_record.updated_at else '',
+            'chat_id': user_record.chat_id,
+            'group_name': chat_room.get(user_record.chat_id, ''),
+            'is_key_focus': bool(user_record.is_key_focus) if hasattr(user_record, 'is_key_focus') else False
+        }
+        
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '',
+            'payload': user_data
+        })
+    except Exception as e:
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
+
+
 @api.route('/tg/group_user/key_focus', methods=['GET'])
 def tg_group_user_key_focus_list():
     """获取重点关注用户（支持分页）"""
@@ -298,11 +362,13 @@ def tg_group_user_key_focus_list():
         if remark:
             query = query.filter(TgGroupUserInfo.remark.like(f'%{remark}%'))
         if keyword:
-            # 关键字搜索：昵称、用户名、备注
+            # 关键字搜索：昵称、用户名、备注、用户ID
             keyword_condition = or_(
                 TgGroupUserInfo.nickname.like(f'%{keyword}%'),
                 TgGroupUserInfo.username.like(f'%{keyword}%'),
-                TgGroupUserInfo.remark.like(f'%{keyword}%')
+                TgGroupUserInfo.remark.like(f'%{keyword}%'),
+                TgGroupUserInfo.user_id.like(f'%{keyword}%'),
+                TgGroupUserInfo.user_id == keyword  # 精确匹配数字类型的user_id
             )
             query = query.filter(keyword_condition)
         

@@ -14,6 +14,14 @@ class TgUserInfoProcessor:
     
     def __init__(self, tg_service):
         self.tg = tg_service
+        # 批次级缓存机制
+        self._user_cache = {}  # 存储已查询的用户信息 {user_id: TgGroupUserInfo对象}
+        self._processed_users = set()  # 当前批次已处理的用户ID集合
+        self._batch_chat_id = None  # 当前批次的chat_id
+        # 统计信息
+        self._cache_hits = 0  # 缓存命中次数
+        self._cache_misses = 0  # 缓存未命中次数
+        self._batch_count = 0  # 处理的批次数
     
     @staticmethod
     def _safe_str(value) -> str:
@@ -39,6 +47,77 @@ class TgUserInfoProcessor:
         else:
             return str(value)
     
+    def clear_batch_cache(self):
+        """清空批次缓存，在处理新批次前调用"""
+        if self._cache_hits + self._cache_misses > 0:
+            hit_rate = self._cache_hits / (self._cache_hits + self._cache_misses) * 100
+            logger.info(f"用户缓存统计: 批次数={self._batch_count}, 命中率={hit_rate:.1f}% ({self._cache_hits}/{self._cache_hits + self._cache_misses})")
+        
+        self._user_cache.clear()
+        self._processed_users.clear()
+        self._batch_chat_id = None
+        # 重置统计信息
+        self._cache_hits = 0
+        self._cache_misses = 0 
+        self._batch_count = 0
+        logger.debug("批次级用户缓存已清空")
+    
+    async def prepare_batch_user_cache(self, batch_messages: list, chat_id: int):
+        """批量预处理用户信息缓存，减少重复数据库查询
+        
+        Args:
+            batch_messages: 消息批次列表
+            chat_id: 群组ID
+        """
+        if self._batch_chat_id != chat_id:
+            # 新的chat_id，清空缓存
+            self.clear_batch_cache()
+            self._batch_chat_id = chat_id
+        
+        # 增加批次计数
+        self._batch_count += 1
+        
+        # 提取批次中所有唯一的用户ID
+        unique_user_ids = set()
+        for msg in batch_messages:
+            user_id = str(msg.get("user_id", ""))
+            if user_id and user_id != "0" and user_id != "777000":
+                unique_user_ids.add(user_id)
+        
+        # 过滤掉已缓存的用户ID
+        uncached_user_ids = unique_user_ids - set(self._user_cache.keys())
+        
+        if not uncached_user_ids:
+            logger.debug(f"批次中{len(unique_user_ids)}个用户都已缓存，跳过数据库查询")
+            return
+        
+        logger.debug(f"批量查询用户信息: chat_id={chat_id}, 用户数={len(uncached_user_ids)}")
+        
+        try:
+            # 批量查询数据库中已存在的用户
+            existing_users = TgGroupUserInfo.query.filter(
+                TgGroupUserInfo.chat_id == str(chat_id),
+                TgGroupUserInfo.user_id.in_(uncached_user_ids)
+            ).all()
+            
+            # 缓存已存在的用户
+            for user in existing_users:
+                self._user_cache[user.user_id] = user
+            
+            # 为不存在的用户ID缓存None值，避免重复查询
+            cached_user_ids = {user.user_id for user in existing_users}
+            for user_id in uncached_user_ids:
+                if user_id not in cached_user_ids:
+                    self._user_cache[user_id] = None
+            
+            logger.debug(f"批量用户缓存完成: 已存在={len(existing_users)}, 新用户={len(uncached_user_ids)-len(existing_users)}")
+            
+        except Exception as e:
+            logger.error(f"批量查询用户信息失败: {e}")
+            # 发生错误时，为所有用户ID缓存None，避免后续查询
+            for user_id in uncached_user_ids:
+                self._user_cache[user_id] = None
+    
     async def save_user_info_from_message(self, data: Dict[str, Any], chat_id: int) -> None:
         """从聊天消息中提取发言人信息并保存到用户信息表"""
         # 参数验证
@@ -50,12 +129,29 @@ class TgUserInfoProcessor:
         if not user_id or user_id == "0" or user_id == "777000":
             return
         
+        # 检查是否在当前批次中已处理过此用户
+        if user_id in self._processed_users:
+            logger.debug(f'用户 {user_id} 在当前批次中已处理，跳过')
+            return
+        
+        # 标记为已处理
+        self._processed_users.add(user_id)
+        
         try:
-            # 检查用户信息是否已存在
-            existing_user = TgGroupUserInfo.query.filter_by(
-                chat_id=str(chat_id), 
-                user_id=user_id
-            ).first()
+            # 优先从缓存获取用户信息
+            existing_user = self._user_cache.get(user_id)
+            if user_id in self._user_cache:
+                self._cache_hits += 1
+            else:
+                # 缓存中没有，单独查询（这种情况应该很少发生，因为已经有批量预处理）
+                self._cache_misses += 1
+                logger.debug(f'用户 {user_id} 不在缓存中，执行单独查询')
+                existing_user = TgGroupUserInfo.query.filter_by(
+                    chat_id=str(chat_id), 
+                    user_id=user_id
+                ).first()
+                # 将查询结果加入缓存
+                self._user_cache[user_id] = existing_user
             
             # 从消息中获取基本信息，使用安全转换函数
             nickname = self._safe_str(data.get("nick_name", ""))
@@ -67,12 +163,25 @@ class TgUserInfoProcessor:
             photo_url = ""
             
             try:
-                # 使用 client.get_entity 获取用户详细信息
+                # 使用 client.get_entity 获取用户基本信息
                 user_entity = await self.tg.client.get_entity(int(user_id))
                 
-                # 提取个人简介 (如果有)
-                if hasattr(user_entity, 'about'):
-                    desc = str(user_entity.about or "")
+                # 使用 GetFullUserRequest 获取完整用户信息以获取个人简介
+                try:
+                    from telethon.tl.functions.users import GetFullUserRequest
+                    full_user = await self.tg.client(GetFullUserRequest(user_entity.id))
+                    
+                    # 从完整用户信息中提取个人简介
+                    if hasattr(full_user, 'full_user'):
+                        desc = str(getattr(full_user.full_user, 'about', '') or "")
+                        if desc:
+                            logger.debug(f'获取用户 {user_id} 个人简介成功: {desc[:50]}...')
+                    
+                except Exception as full_user_error:
+                    logger.warning(f'获取用户 {user_id} 完整信息失败，尝试基本方式: {full_user_error}')
+                    # 降级到基本方式获取个人简介 (可能不完整)
+                    if hasattr(user_entity, 'about'):
+                        desc = str(user_entity.about or "")
                 
                 # 处理头像
                 if hasattr(user_entity, 'photo') and user_entity.photo:
@@ -123,6 +232,8 @@ class TgUserInfoProcessor:
                 
                 user_obj = TgGroupUserInfo(**params)
                 db.session.add(user_obj)
+                # 更新缓存
+                self._user_cache[user_id] = user_obj
                 logger.debug(f'新增用户信息: user_id={user_id}, nickname={nickname}, username={username}, desc={desc[:50]}...')
                 
         except Exception as e:

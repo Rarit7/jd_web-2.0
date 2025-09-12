@@ -346,7 +346,8 @@
     <!-- 用户详情抽屉 -->
     <UserDetailDrawer
       v-model:visible="showUserDrawer"
-      :user-detail="selectedUserDetail"
+      :userId="selectedUserId"
+      :currentGroupId="selectedChat?.chat_id"
       @navigate-to-user-messages="handleNavigateToUserMessages"
     />
 
@@ -525,7 +526,7 @@ const messageLoading = ref(false)
 
 // 用户详情抽屉相关
 const showUserDrawer = ref(false)
-const selectedUserDetail = ref<Message | null>(null)
+const selectedUserId = ref<string>('')
 
 // 搜索相关
 const showSearchDrawer = ref(false)
@@ -1524,7 +1525,8 @@ const handleExport = async () => {
 
 // 显示用户详情抽屉
 const showUserDetail = (message: Message) => {
-  selectedUserDetail.value = message
+  // 简化：只传递user_id，让组件自己加载完整信息
+  selectedUserId.value = message.user_id
   showUserDrawer.value = true
 }
 

@@ -1,20 +1,29 @@
 <template>
-  <router-view />
+  <div id="app">
+    <router-view />
+  </div>
 </template>
 
 <script setup lang="ts">
-// App根组件
+import { onMounted } from 'vue'
+
+onMounted(() => {
+  console.log('App.vue loaded')
+})
 </script>
 
 <style>
+@import './styles/index.scss';
+
 #app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  height: 100%;
 }
 
-body {
+html, body {
+  height: 100%;
   margin: 0;
   padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 </style>

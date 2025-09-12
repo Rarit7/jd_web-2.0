@@ -17,7 +17,6 @@ from jd.models.tg_group_user_info import TgGroupUserInfo
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.errors import UserPrivacyRestrictedError, UsernameInvalidError, UserIdInvalidError
 from telethon.errors.rpcerrorlist import PeerIdInvalidError
-from telethon.errors import ValueError as TelethonValueError
 
 # 配置日志
 logging.basicConfig(
@@ -83,20 +82,20 @@ class UserProfileUpdater:
                 # 这些错误不需要重试
                 logger.warning(f"用户 {user_id} 隐私限制或ID无效: {e}")
                 return ''
-            except TelethonValueError as e:
+            except ValueError as e:
                 if "Could not find the input entity" in str(e):
                     # 实体不存在的错误不需要重试，直接使用备用方法
                     logger.warning(f"用户 {user_id} 实体不存在，尝试通过群组成员查找: {e}")
                     return await self._get_user_profile_via_groups(user_id)
                 else:
-                    # 其他Telethon值错误可能需要重试
+                    # 其他值错误可能需要重试
                     if attempt < max_retries - 1:
                         wait_time = (2 ** attempt) * 1  # 指数退避: 1s, 2s, 4s
                         logger.warning(f"获取用户 {user_id} 简介失败 (尝试 {attempt + 1}/{max_retries})，{wait_time}秒后重试: {e}")
                         await asyncio.sleep(wait_time)
                         continue
                     else:
-                        logger.error(f"获取用户 {user_id} 个人简介时发生Telethon值错误，重试已耗尽: {e}")
+                        logger.error(f"获取用户 {user_id} 个人简介时发生值错误，重试已耗尽: {e}")
                         return ''
             except ValueError as e:
                 if "Could not find the input entity" in str(e):

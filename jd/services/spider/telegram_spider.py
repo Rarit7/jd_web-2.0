@@ -767,8 +767,8 @@ class TelegramAPIs(object):
                 tick += 1
                 if tick >= waterline:
                     tick = 0
-                    waterline = randint(5, 10)
-                    time.sleep(waterline)
+                    waterline = randint(50, 100)
+                    time.sleep(0.1)
                 count += 1
                 yield m
 

@@ -24,10 +24,22 @@ class Application(Flask):
         if os.path.exists(local_config):
             print('loading local config: %s' % local_config)
             self.config.from_pyfile(local_config)
+        # 生产环境配置
+        production_config = os.path.abspath(os.path.join(JD_ROOT, '../config_production.py'))
+        if os.path.exists(production_config):
+            print('loading production config: %s' % production_config)
+            self.config.from_pyfile(production_config)
         self.static_folder = os.path.abspath(os.path.join(JD_ROOT, '../static'))
         self.secret_key = self.config.get('SESSION_SECRET_KEY')
+        
+        # SSL支持配置
+        if self.config.get('PREFERRED_URL_SCHEME') == 'https':
+            self.config['PREFERRED_URL_SCHEME'] = 'https'
 
     def ready(self, db_switch=True, web_switch=True, worker_switch=True, socketio_switch=False):
+        # 首先初始化日志系统
+        self.setup_logging()
+        
         if db_switch:
             db.init_app(self)
         if web_switch:
@@ -36,6 +48,11 @@ class Application(Flask):
             self.prepare_celery()
         if socketio_switch:
             self.prepare_socketio()
+    
+    def setup_logging(self):
+        """初始化统一日志配置"""
+        from jd.utils.logging_config import setup_logging
+        setup_logging(self.config)
 
     def prepare_blueprints(self):
         from jd import views

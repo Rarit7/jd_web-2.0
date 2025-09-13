@@ -328,3 +328,68 @@ class TgUserInfoProcessor:
         except Exception as e:
             logger.error(f'记录用户信息变化失败: {e}')
             db.session.rollback()
+
+    async def save_user_info_from_message_batch(self, batch_messages: list, chat_id: int) -> None:
+        """批量处理消息中的用户信息，优化版本"""
+        if not batch_messages:
+            return
+            
+        try:
+            # 提取所有用户信息，去重
+            user_data_map = {}
+            for data in batch_messages:
+                user_id = str(data.get("user_id", ""))
+                if user_id and user_id != "0" and user_id != "777000":
+                    # 使用最新的用户信息（如果同一用户在批次中出现多次）
+                    user_data_map[user_id] = {
+                        'nickname': data.get("nick_name", ""),
+                        'username': data.get("user_name", ""),
+                        'user_id': user_id
+                    }
+            
+            if not user_data_map:
+                return
+                
+            # 批量查询现有用户
+            existing_users = TgGroupUserInfo.query.filter(
+                TgGroupUserInfo.chat_id == str(chat_id),
+                TgGroupUserInfo.user_id.in_(user_data_map.keys())
+            ).all()
+            
+            existing_user_map = {user.user_id: user for user in existing_users}
+            
+            # 批量创建新用户对象
+            new_users = []
+            for user_id, user_data in user_data_map.items():
+                if user_id not in existing_user_map:
+                    user_obj = TgGroupUserInfo(
+                        chat_id=str(chat_id),
+                        user_id=user_id,
+                        nickname=self._safe_str(user_data['nickname']),
+                        username=self._safe_str(user_data['username']),
+                        desc='',
+                        avatar_path='',
+                        photo=''
+                    )
+                    new_users.append(user_obj)
+                    # 更新缓存
+                    self._user_cache[user_id] = user_obj
+                else:
+                    # 更新现有用户的基本信息（昵称和用户名）
+                    existing_user = existing_user_map[user_id]
+                    new_data = {
+                        'nickname': user_data['nickname'],
+                        'username': user_data['username'],
+                        'desc': '',
+                        'avatar_path': ''
+                    }
+                    self._update_existing_user(existing_user, new_data)
+            
+            # 批量添加新用户
+            if new_users:
+                db.session.add_all(new_users)
+                logger.debug(f'批量创建 {len(new_users)} 个新用户信息记录')
+                
+        except Exception as e:
+            logger.error(f'批量处理用户信息失败: {e}')
+            db.session.rollback()

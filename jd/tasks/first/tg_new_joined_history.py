@@ -220,12 +220,16 @@ def start_group_history_fetch(group_name: str, chat_id: int, session_name: str =
     
     此函数提供同步调用接口，内部使用Celery异步任务
     """
-    # 验证必需参数
-    if not group_name or not chat_id:
+    # 验证必需参数：至少需要chat_id，group_name可以为空
+    if not chat_id:
         return {
             'err_code': 1,
-            'err_msg': '缺少必需参数：group_name 和 chat_id 不能为空',
+            'err_msg': '缺少必需参数：chat_id 不能为空',
         }
+    
+    # 如果group_name为空，使用chat_id作为显示名称
+    if not group_name or not group_name.strip():
+        group_name = f"Group_{chat_id}"
     
     try:
         # 使用改进的任务队列管理触发Celery任务
@@ -299,6 +303,11 @@ def fetch_new_joined_group_history(chat_id: int, session_name: str, group_name: 
     Returns:
         Dict[str, Any]: 任务执行结果
     """
-    display_name = group_name or f'Group_{chat_id}'
+    # 如果group_name为空或无效，使用chat_id作为显示名称
+    if not group_name or not group_name.strip():
+        display_name = f'Group_{chat_id}'
+    else:
+        display_name = group_name.strip()
+    
     return run_new_group_history_fetch(display_name, chat_id, session_name)
 

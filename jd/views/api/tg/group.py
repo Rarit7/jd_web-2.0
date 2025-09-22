@@ -28,14 +28,20 @@ def tg_group_list_json():
     args = request.args
     account_id = get_or_exception('account_id', args, 'str', '')
     group_name = get_or_exception('group_name', args, 'str', '')
+    chat_id = get_or_exception('chat_id', args, 'str', '')
+    group_link = get_or_exception('group_link', args, 'str', '')
     remark = get_or_exception('remark', args, 'str', '')
     tag_ids = get_or_exception('tag_ids', args, 'str', '')
-    
+
     query = TgGroup.query
     if account_id:
         query = query.filter(TgGroup.account_id == account_id)
     if group_name:
         query = query.filter(TgGroup.title.like('%' + group_name + '%'))
+    if chat_id:
+        query = query.filter(TgGroup.chat_id.like('%' + chat_id + '%'))
+    if group_link:
+        query = query.filter(TgGroup.name.like('%' + group_link + '%'))
     if remark:
         query = query.filter(TgGroup.remark.like('%' + remark + '%'))
     
@@ -70,6 +76,8 @@ def tg_group_list_json():
                 'tag_list': tag_list,
                 'default_account_id': account_id,
                 'default_group_name': group_name,
+                'default_chat_id': chat_id,
+                'default_group_link': group_link,
                 'default_remark': remark,
                 'role_ids': RoleService.user_roles(session.get('current_user_id', 1))
             }
@@ -132,7 +140,8 @@ def tg_group_list_json():
             no_chat_history_group.append(d)
             continue
         data.append(d)
-    data = sorted(data, key=lambda x: [x['group_type'], x['latest_postal_time']])
+    # 按最后发言时间降序排列（最新的在前面），没有发言记录的放在最后
+    data = sorted(data, key=lambda x: x['latest_postal_time'], reverse=True)
     data.extend(no_chat_history_group)
     for d in data:
         if not d['latest_postal_time']:
@@ -148,6 +157,8 @@ def tg_group_list_json():
             'tag_list': tag_list,
             'default_account_id': account_id,
             'default_group_name': group_name,
+            'default_chat_id': chat_id,
+            'default_group_link': group_link,
             'default_remark': remark,
             'role_ids': RoleService.user_roles(session.get('current_user_id', 1))
         }
@@ -263,14 +274,20 @@ def tg_group_download():
     args = request.args
     account_id = get_or_exception('account_id', args, 'str', '')
     group_name = get_or_exception('group_name', args, 'str', '')
+    chat_id = get_or_exception('chat_id', args, 'str', '')
+    group_link = get_or_exception('group_link', args, 'str', '')
     remark = get_or_exception('remark', args, 'str', '')
     tag_ids = get_or_exception('tag_ids', args, 'str', '')
-    
+
     query = TgGroup.query
     if account_id:
         query = query.filter(TgGroup.account_id == account_id)
     if group_name:
         query = query.filter(TgGroup.title.like('%' + group_name + '%'))
+    if chat_id:
+        query = query.filter(TgGroup.chat_id.like('%' + chat_id + '%'))
+    if group_link:
+        query = query.filter(TgGroup.name.like('%' + group_link + '%'))
     if remark:
         query = query.filter(TgGroup.remark.like('%' + remark + '%'))
     
@@ -347,7 +364,8 @@ def tg_group_download():
             no_chat_history_group.append(d)
             continue
         data.append(d)
-    data = sorted(data, key=lambda x: x['latest_postal_time'])
+    # 按最后发言时间降序排列（最新的在前面），没有发言记录的放在最后
+    data = sorted(data, key=lambda x: x['latest_postal_time'], reverse=True)
     data.extend(no_chat_history_group)
     for d in data:
         if not d['latest_postal_time']:

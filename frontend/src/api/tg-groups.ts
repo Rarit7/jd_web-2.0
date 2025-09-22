@@ -25,6 +25,8 @@ export interface TgGroup {
 export interface TgGroupListParams {
   account_id?: string
   group_name?: string
+  chat_id?: string
+  group_link?: string
   remark?: string
   tag_ids?: string
 }

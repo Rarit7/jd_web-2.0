@@ -15,19 +15,41 @@
       <div class="search-area">
         <el-form :model="searchForm" inline>
           <el-form-item label="群组名称">
-            <div class="search-input-group">
-              <el-input 
-                v-model="searchForm.group_name" 
-                placeholder="请输入群组名称" 
-                clearable 
-                style="width: 250px;"
-                @keydown.enter="fetchData"
-                @clear="fetchData"
-              />
-              <el-button type="primary" @click="fetchData" class="search-button">
-                <el-icon><Search /></el-icon>
-              </el-button>
-            </div>
+            <el-input
+              v-model="searchForm.group_name"
+              placeholder="请输入群组名称"
+              clearable
+              style="width: 200px;"
+              @keydown.enter="fetchData"
+              @clear="fetchData"
+            />
+          </el-form-item>
+          <el-form-item label="群组ID">
+            <el-input
+              v-model="searchForm.chat_id"
+              placeholder="请输入数字ID"
+              clearable
+              style="width: 150px;"
+              @keydown.enter="fetchData"
+              @clear="fetchData"
+            />
+          </el-form-item>
+          <el-form-item label="群组链接">
+            <el-input
+              v-model="searchForm.group_link"
+              placeholder="请输入群组链接"
+              clearable
+              style="width: 200px;"
+              @keydown.enter="fetchData"
+              @clear="fetchData"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="fetchData">
+              <el-icon><Search /></el-icon>
+              搜索
+            </el-button>
+            <el-button @click="resetSearch">重置</el-button>
           </el-form-item>
           <el-form-item label="标签筛选">
             <el-select 
@@ -56,6 +78,29 @@
             </el-select>
           </el-form-item>
         </el-form>
+
+        <!-- 活跃度说明 -->
+        <div class="activity-legend">
+          <span class="legend-title">活跃度：</span>
+          <div class="legend-items">
+            <div class="legend-item">
+              <span class="legend-dot very-active"></span>
+              <span>1天内</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot active"></span>
+              <span>7天内</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot less-active"></span>
+              <span>30天内</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot inactive"></span>
+              <span>30天+</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 数据卡片 -->
@@ -64,10 +109,11 @@
           <el-empty description="暂无群组数据" />
         </div>
         <div v-else class="cards-grid">
-          <el-card 
-            v-for="group in tableData" 
-            :key="group.id" 
+          <el-card
+            v-for="group in tableData"
+            :key="group.id"
             class="group-card"
+            :class="getActivityClass(group)"
             shadow="hover"
           >
             <template #header>
@@ -150,6 +196,7 @@
                 <div class="info-row time-row">
                   <div class="time-item" v-if="group.latest_postal_time">
                     <span class="label">最新消息:</span>
+                    <span class="activity-indicator" :class="getActivityClass(group)"></span>
                     <span class="value" :class="{ 'old-time': group.three_days_ago }">
                       {{ formatUTCToLocal(group.latest_postal_time) }}
                     </span>
@@ -306,6 +353,8 @@ const editFormRef = ref<FormInstance>()
 // 搜索表单
 const searchForm = reactive({
   group_name: '',
+  chat_id: '',
+  group_link: '',
   tag_ids: [] as number[]
 })
 
@@ -370,6 +419,12 @@ const fetchData = async () => {
     if (searchForm.group_name) {
       params.group_name = searchForm.group_name
     }
+    if (searchForm.chat_id) {
+      params.chat_id = searchForm.chat_id
+    }
+    if (searchForm.group_link) {
+      params.group_link = searchForm.group_link
+    }
     if (searchForm.tag_ids.length > 0) {
       params.tag_ids = searchForm.tag_ids.join(',')
     }
@@ -395,6 +450,14 @@ const fetchData = async () => {
   }
 }
 
+// 重置搜索
+const resetSearch = () => {
+  searchForm.group_name = ''
+  searchForm.chat_id = ''
+  searchForm.group_link = ''
+  searchForm.tag_ids = []
+  fetchData()
+}
 
 // 获取TG账户列表
 const fetchTgAccounts = async () => {
@@ -519,6 +582,12 @@ const downloadData = async () => {
     if (searchForm.group_name) {
       params.group_name = searchForm.group_name
     }
+    if (searchForm.chat_id) {
+      params.chat_id = searchForm.chat_id
+    }
+    if (searchForm.group_link) {
+      params.group_link = searchForm.group_link
+    }
     if (searchForm.tag_ids.length > 0) {
       params.tag_ids = searchForm.tag_ids.join(',')
     }
@@ -557,6 +626,26 @@ const getStatusType = (status: string) => {
   }
 }
 
+// 获取群组活跃度样式类
+const getActivityClass = (group: any) => {
+  if (!group.latest_postal_time) {
+    return 'inactive-group'
+  }
+
+  const now = new Date()
+  const lastTime = new Date(group.latest_postal_time)
+  const diffDays = Math.floor((now.getTime() - lastTime.getTime()) / (1000 * 60 * 60 * 24))
+
+  if (diffDays <= 1) {
+    return 'very-active-group'  // 1天内
+  } else if (diffDays <= 7) {
+    return 'active-group'       // 7天内
+  } else if (diffDays <= 30) {
+    return 'less-active-group'  // 30天内
+  } else {
+    return 'inactive-group'     // 超过30天
+  }
+}
 
 // 检查描述是否溢出
 const checkDescriptionOverflow = () => {
@@ -695,6 +784,59 @@ onMounted(() => {
   border-radius: 4px;
 }
 
+.activity-legend {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e4e7ed;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.legend-title {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.legend-items {
+  display: flex;
+  gap: 15px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.legend-dot.very-active {
+  background-color: #67c23a;
+  box-shadow: 0 0 4px rgba(103, 194, 58, 0.5);
+}
+
+.legend-dot.active {
+  background-color: #409eff;
+  box-shadow: 0 0 4px rgba(64, 158, 255, 0.5);
+}
+
+.legend-dot.less-active {
+  background-color: #e6a23c;
+}
+
+.legend-dot.inactive {
+  background-color: #909399;
+}
+
 .card-container {
   min-height: 400px;
   background-image: url('/bg.webp');
@@ -728,6 +870,54 @@ onMounted(() => {
 .group-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+/* 群组活跃度样式 */
+.very-active-group {
+  border-left: 4px solid #67c23a;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e6fffa 100%);
+}
+
+.active-group {
+  border-left: 4px solid #409eff;
+  background: linear-gradient(135deg, #f0f9ff 0%, #f5f7fa 100%);
+}
+
+.less-active-group {
+  border-left: 4px solid #e6a23c;
+}
+
+.inactive-group {
+  border-left: 4px solid #909399;
+  opacity: 0.7;
+}
+
+/* 活跃度指示器 */
+.activity-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.activity-indicator.very-active-group {
+  background-color: #67c23a;
+  box-shadow: 0 0 6px rgba(103, 194, 58, 0.5);
+}
+
+.activity-indicator.active-group {
+  background-color: #409eff;
+  box-shadow: 0 0 6px rgba(64, 158, 255, 0.5);
+}
+
+.activity-indicator.less-active-group {
+  background-color: #e6a23c;
+}
+
+.activity-indicator.inactive-group {
+  background-color: #909399;
 }
 
 .card-header-content {

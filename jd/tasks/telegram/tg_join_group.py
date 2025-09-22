@@ -31,13 +31,40 @@ def join_group(group_name, sessionname='', current_user_id=None):
             telegram_user_id = str(myself.id) if myself else ''
             
             result = await tg.join_conversation(group_name)
-            chat_id = result.get('data', {}).get('id', 0)
+            chat_id = str(result.get('data', {}).get('id', ''))
             
             if result.get('result', 'Failed') == 'Failed':
+                # 根据错误信息判断失败原因
+                error_message = result.get("message", "Unknown error")
+
+                # 检查是否是无效链接的常见错误信息
+                if any(keyword in error_message.lower() for keyword in [
+                    'not found', 'invalid', 'does not exist', 'username not found',
+                    'chat not found', 'peer not found', 'cannot find', '找不到', '无效'
+                ]):
+                    status = TgGroup.StatusType.INVALID_LINK
+                    status_desc = 'invalid link'
+                else:
+                    status = TgGroup.StatusType.JOIN_FAIL
+                    status_desc = 'join failed'
+
                 update_info = {
-                    'status': TgGroup.StatusType.JOIN_FAIL
+                    'status': status
                 }
+                # 当加入失败时，直接更新原记录，不进行chat_id相关的查询
+                TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update(update_info)
+                db.session.commit()
+                return f'{group_name} {status_desc}: {error_message}'
             else:
+                # 检查chat_id是否有效
+                if not chat_id or chat_id == '':
+                    update_info = {
+                        'status': TgGroup.StatusType.INVALID_LINK
+                    }
+                    TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update(update_info)
+                    db.session.commit()
+                    return f'{group_name} invalid link: Invalid chat_id'
+
                 channel_full = await tg.get_full_channel(chat_id)
                 logger.info(f'{group_name} 群聊加入成功: {channel_full}')
                 
@@ -58,25 +85,25 @@ def join_group(group_name, sessionname='', current_user_id=None):
                 # 2. tg_group_session表：添加新的一行数据，建立用户和群聊的关系
                 existing_session = TgGroupSession.query.filter_by(
                     user_id=telegram_user_id,
-                    chat_id=str(chat_id),
+                    chat_id=chat_id,
                     session_name=sessionname
                 ).first()
                 
                 if not existing_session:
                     tg_group_session = TgGroupSession(
                         user_id=telegram_user_id,
-                        chat_id=str(chat_id),
+                        chat_id=chat_id,
                         session_name=sessionname
                     )
                     db.session.add(tg_group_session)
                 
                 # 3. tg_group_status表：处理群组状态信息
-                existing_status = TgGroupStatus.query.filter_by(chat_id=str(chat_id)).first()
+                existing_status = TgGroupStatus.query.filter_by(chat_id=chat_id).first()
                 
                 if not existing_status:
                     # 首次出现的chat_id，创建新记录
                     tg_group_status = TgGroupStatus(
-                        chat_id=str(chat_id),
+                        chat_id=chat_id,
                         members_now=member_count,
                         members_previous=0,
                         records_now=0,
@@ -87,21 +114,28 @@ def join_group(group_name, sessionname='', current_user_id=None):
                     db.session.add(tg_group_status)
                 else:
                     # chat_id已存在，只更新群人数信息
-                    TgGroupStatus.query.filter_by(chat_id=str(chat_id)).update({
+                    TgGroupStatus.query.filter_by(chat_id=chat_id).update({
                         'members_previous': existing_status.members_now,
                         'members_now': member_count
                     })
-            
-            tg_groups = TgGroup.query.filter(TgGroup.chat_id == chat_id).order_by(TgGroup.id.desc()).all()
-            # 处理不同username加入同一群组的情况
-            if len(tg_groups) > 1:
-                # 更新原来的群组信息
-                TgGroup.query.filter(TgGroup.chat_id == chat_id).update(update_info)
-                # 删除新的群组
-                _id = tg_groups[-1].id
-                TgGroup.query.filter_by(id=_id).delete()
+
+            # 只有当chat_id有效时才进行基于chat_id的查询和处理
+            if chat_id and chat_id != '':
+                tg_groups = TgGroup.query.filter(TgGroup.chat_id == chat_id).order_by(TgGroup.id.desc()).all()
+                # 处理不同username加入同一群组的情况
+                if len(tg_groups) > 1:
+                    # 更新原来的群组信息
+                    TgGroup.query.filter(TgGroup.chat_id == chat_id).update(update_info)
+                    # 删除新的群组
+                    _id = tg_groups[-1].id
+                    TgGroup.query.filter_by(id=_id).delete()
+                else:
+                    TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update(update_info)
             else:
-                TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update(update_info)
+                # 如果chat_id无效，只更新原来的记录状态
+                TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update({
+                    'status': TgGroup.StatusType.INVALID_LINK
+                })
             
             db.session.commit()
             return f'{group_name} join group success'

@@ -15,7 +15,8 @@ class TgService:
         TgGroup.StatusType.NOT_JOIN: '未加入',
         TgGroup.StatusType.JOIN_SUCCESS: '已加入',
         TgGroup.StatusType.JOIN_FAIL: '加入失败',
-        TgGroup.StatusType.JOIN_ONGOING: '进行中'
+        TgGroup.StatusType.JOIN_ONGOING: '进行中',
+        TgGroup.StatusType.INVALID_LINK: '已过期'
     }
 
     @classmethod

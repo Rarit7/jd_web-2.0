@@ -301,7 +301,7 @@ class TgUserInfoProcessor:
     
     def _record_user_info_change(self, user_id: str, changed_field: int, old_value: str, new_value: str) -> None:
         """
-        记录用户信息变化
+        记录用户信息变化（带时间窗口去重）
         :param user_id: 用户ID
         :param changed_field: 变化字段类型
         :param old_value: 原值
@@ -312,19 +312,39 @@ class TgUserInfoProcessor:
             if isinstance(changed_field, dict):
                 logger.error(f'changed_field 参数不能是字典类型: {changed_field}')
                 return
-                
+
             changed_field = int(changed_field) if changed_field else 0
-            
+            current_time = datetime.datetime.now()
+
+            # 创建时间窗口（2小时内的相同变动将被去重）
+            time_window_hours = 2
+            window_start = current_time - datetime.timedelta(hours=time_window_hours)
+
+            # 检查时间窗口内是否已存在相同的变动记录
+            existing_record = TgUserInfoChange.query.filter(
+                TgUserInfoChange.user_id == str(user_id),
+                TgUserInfoChange.changed_fields == changed_field,
+                TgUserInfoChange.original_value == (str(old_value) if old_value else ''),
+                TgUserInfoChange.new_value == (str(new_value) if new_value else ''),
+                TgUserInfoChange.update_time >= window_start
+            ).first()
+
+            if existing_record:
+                logger.debug(f'用户 {user_id} 在 {time_window_hours} 小时内已存在相同变动记录，跳过重复记录')
+                return
+
+            # 创建新的变动记录
             change_record = TgUserInfoChange(
                 user_id=str(user_id),
                 changed_fields=changed_field,
                 original_value=str(old_value) if old_value else '',
                 new_value=str(new_value) if new_value else '',
-                update_time=datetime.datetime.now()
+                update_time=current_time
             )
             db.session.add(change_record)
             db.session.flush()
-            logger.debug(f'记录用户信息变化: user_id={user_id}, field={changed_field}')
+            logger.info(f'记录用户信息变化: user_id={user_id}, field={changed_field}, 变动: "{old_value}" -> "{new_value}"')
+
         except Exception as e:
             logger.error(f'记录用户信息变化失败: {e}')
             db.session.rollback()

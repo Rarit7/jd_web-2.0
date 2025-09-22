@@ -1,344 +1,244 @@
-import unittest
+#!/usr/bin/env python3
+"""
+脚本名称: test_get_dialog_list.py (修改版)
+功能描述: 使用真实session文件测试get_dialog_list方法，打印所有获取的对话信息
+作者: Claude Code
+修改时间: 2025-09-22
+"""
+
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, call
-from datetime import datetime
+import logging
 import sys
 import os
+import json
+from datetime import datetime
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from jd.services.spider.telegram_spider import TelegramAPIs
-from telethon.tl.types import Channel, Chat
+from jd.services.spider.tg import TgService
+from jd import app
+
+# 配置日志输出
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
-class TestGetDialogList(unittest.TestCase):
-    """测试TelegramAPIs.get_dialog_list方法"""
+def list_available_sessions():
+    """
+    列出所有可用的session文件
+    """
+    utils_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'utils')
+    session_files = []
 
-    def setUp(self):
-        """测试前准备"""
-        self.api = TelegramAPIs()
-        
-        # Mock client
-        self.mock_client = AsyncMock()
-        self.api.client = self.mock_client
-        
-        # 示例频道数据
-        self.sample_channel_data = {
-            'id': 123456789,
-            'title': '测试频道',
-            'username': 'test_channel',
-            'date': datetime(2023, 1, 1, 12, 0, 0)
-        }
-        
-        # 示例群组数据  
-        self.sample_chat_data = {
-            'id': 987654321,
-            'title': '测试群组',
-            'date': datetime(2023, 1, 1, 12, 0, 0)
-        }
+    if os.path.exists(utils_dir):
+        for file in os.listdir(utils_dir):
+            if file.endswith('-telegram.session'):
+                session_name = file.replace('-telegram.session', '')
+                file_path = os.path.join(utils_dir, file)
+                file_size = os.path.getsize(file_path)
+                modification_time = os.path.getmtime(file_path)
+                session_files.append({
+                    'name': session_name,
+                    'size': file_size,
+                    'mtime': modification_time,
+                    'file': file
+                })
 
-    def create_mock_dialog(self, entity_type='channel', entity_data=None, unread_count=5):
-        """创建模拟对话对象"""
-        mock_dialog = Mock()
-        mock_dialog.unread_count = unread_count
-        
-        if entity_type == 'channel':
-            entity_data = entity_data or self.sample_channel_data
-            mock_entity = Mock(spec=Channel)
-            mock_entity.id = entity_data['id']
-            mock_entity.title = entity_data['title']
-            mock_entity.username = entity_data.get('username')
-            mock_entity.date = entity_data['date']
-        elif entity_type == 'chat':
-            entity_data = entity_data or self.sample_chat_data
-            mock_entity = Mock(spec=Chat)
-            mock_entity.id = entity_data['id']
-            mock_entity.title = entity_data['title']
-            mock_entity.date = entity_data['date']
+    # 按修改时间排序，最新的在前
+    session_files.sort(key=lambda x: x['mtime'], reverse=True)
+    return session_files
+
+async def test_real_get_dialog_list(session_name='default2'):
+    """
+    使用真实session文件测试get_dialog_list方法
+
+    Args:
+        session_name (str): session文件名前缀，默认为'default2'
+    """
+    try:
+        # 在应用上下文中执行
+        with app.app_context():
+            logger.info(f"开始初始化Telegram客户端，使用{session_name}-telegram.session文件")
+
+            # 使用TgService的init_tg方法
+            tg_client = await TgService.init_tg(sessionname=session_name)
+
+            if tg_client is None:
+                logger.error(f"Session '{session_name}' 初始化失败，可能未授权或已过期")
+                return
+
+            logger.info("Telegram客户端初始化成功，正在获取对话列表...")
+
+            # 获取对话列表
+            dialog_count = 0
+            print("\n" + "="*80)
+            print(f"Telegram 对话列表信息 (使用session: {session_name})")
+            print("="*80)
+
+            async for dialog_info in tg_client.get_dialog_list():
+                dialog_count += 1
+
+                # 打印每个对话的详细信息
+                print(f"\n对话 #{dialog_count}:")
+                print("-" * 60)
+
+                if dialog_info.get('data'):
+                    data = dialog_info['data']
+
+                    # 基本信息
+                    print(f"ID: {data.get('id', 'N/A')}")
+                    print(f"标题: {data.get('title', 'N/A')}")
+                    print(f"用户名: @{data.get('username', '未设置') if data.get('username') else '未设置'}")
+                    print(f"类型: {data.get('group_type', 'N/A')}")
+                    print(f"分类: {data.get('megagroup', 'N/A')}")
+
+                    # 统计信息
+                    print(f"成员数量: {data.get('member_count', 'N/A')}")
+                    print(f"未读消息: {data.get('unread_count', 'N/A')}")
+                    print(f"是否公开: {'是' if data.get('is_public') == 1 else '否'}")
+
+                    # 时间信息
+                    print(f"加入时间: {data.get('join_date', 'N/A')}")
+
+                    # 描述信息
+                    description = data.get('channel_description', '')
+                    if description:
+                        print(f"描述: {description[:100]}{'...' if len(description) > 100 else ''}")
+                    else:
+                        print("描述: 无")
+
+                    # 头像信息
+                    photo_path = data.get('photo_path', '')
+                    if photo_path:
+                        print(f"头像路径: {photo_path}")
+                    else:
+                        print("头像路径: 无")
+
+                    # 完整JSON数据（可选，用于调试）
+                    print("\n完整数据JSON:")
+                    print(json.dumps(dialog_info, indent=2, ensure_ascii=False))
+
+                else:
+                    print("数据: 无（可能是个人对话，已跳过）")
+                    print(f"状态: {dialog_info.get('result', 'unknown')}")
+                    print(f"原因: {dialog_info.get('reason', 'unknown')}")
+
+                print("-" * 60)
+
+            print(f"\n总计找到 {dialog_count} 个对话")
+            print("="*80)
+
+            # 关闭客户端连接
+            await tg_client.close_client()
+            logger.info("Telegram客户端连接已关闭")
+
+    except Exception as e:
+        logger.error(f"执行过程中发生错误: {e}")
+        import traceback
+        logger.error(f"详细错误信息: {traceback.format_exc()}")
+
+def check_session_file(session_name='default2'):
+    """
+    检查session文件是否存在
+
+    Args:
+        session_name (str): session文件名前缀
+    """
+    session_file = os.path.join(os.path.dirname(__file__), '..', 'static', 'utils', f'{session_name}-telegram.session')
+    if not os.path.exists(session_file):
+        logger.error(f"Session文件不存在: {session_file}")
+        return False
+
+    logger.info(f"Session文件存在: {session_file}")
+    file_size = os.path.getsize(session_file)
+    logger.info(f"Session文件大小: {file_size} bytes")
+    return True
+
+def print_usage():
+    """打印使用说明"""
+    print("用法:")
+    print("  python tests/test_get_dialog_list.py [session_name]")
+    print("")
+    print("参数:")
+    print("  session_name    指定要使用的session名称 (默认: default2)")
+    print("")
+    print("示例:")
+    print("  python tests/test_get_dialog_list.py          # 使用default2 session")
+    print("  python tests/test_get_dialog_list.py 111      # 使用111 session")
+    print("  python tests/test_get_dialog_list.py web      # 使用web session")
+
+async def main():
+    """
+    主函数：解析命令行参数并运行真实的get_dialog_list测试
+    """
+    print("Telegram get_dialog_list 真实测试工具")
+
+    # 解析命令行参数
+    session_name = 'default2'  # 默认使用default2 session
+
+    # 检查帮助参数
+    if len(sys.argv) > 1 and sys.argv[1] in ['-h', '--help']:
+        print_usage()
+        sys.exit(0)
+
+    # 解析session名称参数
+    if len(sys.argv) > 1:
+        session_name = sys.argv[1]
+
+    print("\n可用的Session文件:")
+    sessions = list_available_sessions()
+    if not sessions:
+        print("未找到任何session文件")
+        sys.exit(1)
+
+    print("序号  Session名称      文件大小    最后修改时间")
+    print("-" * 60)
+    for i, session in enumerate(sessions, 1):
+        import time
+        mtime_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(session['mtime']))
+        print(f"{i:2d}    {session['name']:<15} {session['size']:>8} bytes  {mtime_str}")
+
+    # 如果指定的session不存在，询问是否使用最新的
+    if not check_session_file(session_name):
+        if sessions:
+            latest_session = sessions[0]['name']
+            print(f"\n指定的session '{session_name}' 不存在")
+            print(f"是否使用最新的session '{latest_session}'? (y/n): ", end='')
+            choice = input().strip().lower()
+            if choice in ['y', 'yes', '是']:
+                session_name = latest_session
+            else:
+                print("用户取消操作")
+                sys.exit(1)
         else:
-            # 个人对话或其他类型，不包含title属性
-            mock_entity = Mock()
-            if hasattr(mock_entity, 'title'):
-                delattr(mock_entity, 'title')
-        
-        mock_dialog.entity = mock_entity
-        return mock_dialog
+            print("错误: 没有可用的session文件，请先运行Telegram初始化")
+            sys.exit(1)
 
-    def create_mock_channel_full(self, megagroup=False, member_count=100, description='测试描述'):
-        """创建模拟频道完整信息"""
-        mock_channel_full = Mock()
-        mock_channel_full.full_chat.participants_count = member_count
-        mock_channel_full.full_chat.about = description
-        
-        # 模拟频道信息
-        mock_chat = Mock()
-        mock_chat.megagroup = megagroup
-        mock_chat.username = 'test_channel' if not megagroup else None
-        mock_channel_full.chats = [mock_chat]
-        
-        return mock_channel_full
+    print(f"\n使用session: {session_name}")
+    print("模式: 获取并显示对话列表（不写入数据库）")
 
-    def create_mock_chat_full(self, member_count=50, description='群组描述'):
-        """创建模拟群组完整信息"""
-        mock_chat_full = Mock()
-        mock_chat_full.full_chat.about = description
-        
-        # 模拟群组信息
-        mock_chat = Mock()
-        mock_chat.participants_count = member_count
-        mock_chat_full.chats = [mock_chat]
-        
-        return mock_chat_full
+    # 初始化应用（仅必要组件）
+    app.ready(db_switch=False, web_switch=False, worker_switch=False, socketio_switch=False)
 
-    @patch('jd.services.spider.telegram_spider.app.static_folder', '/fake/static')
-    @patch('os.path.join')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._ensure_directory')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._download_avatar')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._process_channel_username')
-    async def test_get_dialog_list_channel_success(self, mock_process_username, mock_download_avatar,
-                                                  mock_ensure_directory, mock_path_join):
-        """测试获取频道对话列表（成功）"""
-        # 设置模拟返回值
-        mock_path_join.return_value = '/fake/static/images/avatar'
-        mock_process_username.return_value = 'test_channel'
-        mock_download_avatar.return_value = 'avatar_path.jpg'
-        
-        # 创建模拟对话
-        mock_dialog = self.create_mock_dialog('channel')
-        mock_channel_full = self.create_mock_channel_full(megagroup=False)
-        
-        # 设置客户端返回值
-        self.mock_client.iter_dialogs.return_value.__aiter__ = AsyncMock(return_value=[mock_dialog])
-        self.mock_client.return_value = mock_channel_full
-        
-        # 执行测试
-        results = []
-        async for result in self.api.get_dialog_list():
-            results.append(result)
-        
-        # 验证结果
-        self.assertEqual(len(results), 1)
-        result = results[0]
-        
-        self.assertEqual(result['result'], 'success')
-        self.assertEqual(result['reason'], 'ok')
-        
-        data = result['data']
-        self.assertEqual(data['id'], 123456789)
-        self.assertEqual(data['title'], '测试频道')
-        self.assertEqual(data['username'], 'test_channel')
-        self.assertEqual(data['megagroup'], 'channel')
-        self.assertEqual(data['member_count'], 100)
-        self.assertEqual(data['channel_description'], '测试描述')
-        self.assertEqual(data['is_public'], 1)
-        self.assertEqual(data['unread_count'], 5)
-        self.assertEqual(data['group_type'], 'channel')
-        self.assertEqual(data['photo_path'], 'avatar_path.jpg')
-        
-        # 验证方法调用
-        mock_ensure_directory.assert_called_once()
-        mock_process_username.assert_called_once()
-        mock_download_avatar.assert_called_once()
-
-    @patch('jd.services.spider.telegram_spider.app.static_folder', '/fake/static')
-    @patch('os.path.join')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._ensure_directory')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._download_avatar')
-    async def test_get_dialog_list_chat_success(self, mock_download_avatar, mock_ensure_directory, mock_path_join):
-        """测试获取群组对话列表（成功）"""
-        # 设置模拟返回值
-        mock_path_join.return_value = '/fake/static/images/avatar'
-        mock_download_avatar.return_value = 'chat_avatar.jpg'
-        
-        # 创建模拟对话
-        mock_dialog = self.create_mock_dialog('chat')
-        mock_chat_full = self.create_mock_chat_full()
-        
-        # 设置客户端返回值
-        self.mock_client.iter_dialogs.return_value.__aiter__ = AsyncMock(return_value=[mock_dialog])
-        self.mock_client.return_value = mock_chat_full
-        
-        # 执行测试
-        results = []
-        async for result in self.api.get_dialog_list():
-            results.append(result)
-        
-        # 验证结果
-        self.assertEqual(len(results), 1)
-        result = results[0]
-        
-        self.assertEqual(result['result'], 'success')
-        data = result['data']
-        self.assertEqual(data['id'], 987654321)
-        self.assertEqual(data['title'], '测试群组')
-        self.assertIsNone(data['username'])
-        self.assertEqual(data['megagroup'], 'group')
-        self.assertEqual(data['member_count'], 50)
-        self.assertEqual(data['is_public'], 0)  # 无username，非公开
-        self.assertEqual(data['group_type'], 'chat')
-
-    @patch('jd.services.spider.telegram_spider.app.static_folder', '/fake/static')
-    @patch('os.path.join')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._ensure_directory')
-    async def test_get_dialog_list_skip_personal_chats(self, mock_ensure_directory, mock_path_join):
-        """测试跳过个人对话"""
-        mock_path_join.return_value = '/fake/static/images/avatar'
-        
-        # 创建个人对话（没有title属性）
-        mock_dialog = self.create_mock_dialog('user')
-        
-        # 设置客户端返回值
-        self.mock_client.iter_dialogs.return_value.__aiter__ = AsyncMock(return_value=[mock_dialog])
-        
-        # 执行测试
-        results = []
-        async for result in self.api.get_dialog_list():
-            results.append(result)
-        
-        # 验证结果：应该返回一个空的成功响应
-        self.assertEqual(len(results), 1)
-        result = results[0]
-        self.assertEqual(result['result'], 'success')
-        self.assertEqual(result['data'], {})
-
-    @patch('jd.services.spider.telegram_spider.app.static_folder', '/fake/static')
-    @patch('os.path.join')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._ensure_directory')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._download_avatar')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._process_channel_username')
-    async def test_get_dialog_list_mixed_types(self, mock_process_username, mock_download_avatar,
-                                              mock_ensure_directory, mock_path_join):
-        """测试混合类型对话列表"""
-        mock_path_join.return_value = '/fake/static/images/avatar'
-        mock_process_username.return_value = 'test_channel'
-        mock_download_avatar.return_value = 'avatar.jpg'
-        
-        # 创建不同类型的对话
-        channel_dialog = self.create_mock_dialog('channel')
-        chat_dialog = self.create_mock_dialog('chat')
-        user_dialog = self.create_mock_dialog('user')  # 个人对话，应该被跳过
-        
-        mock_channel_full = self.create_mock_channel_full()
-        mock_chat_full = self.create_mock_chat_full()
-        
-        # 设置客户端返回值
-        self.mock_client.iter_dialogs.return_value.__aiter__ = AsyncMock(
-            return_value=[channel_dialog, chat_dialog, user_dialog]
-        )
-        
-        # 为不同调用设置不同返回值
-        self.mock_client.side_effect = [mock_channel_full, mock_chat_full]
-        
-        # 执行测试
-        results = []
-        async for result in self.api.get_dialog_list():
-            results.append(result)
-        
-        # 验证结果：应该有3个结果（2个有效对话 + 1个跳过的个人对话）
-        self.assertEqual(len(results), 3)
-        
-        # 验证频道
-        channel_result = results[0]
-        self.assertEqual(channel_result['data']['group_type'], 'channel')
-        
-        # 验证群组
-        chat_result = results[1]
-        self.assertEqual(chat_result['data']['group_type'], 'chat')
-        
-        # 验证个人对话被跳过
-        user_result = results[2]
-        self.assertEqual(user_result['data'], {})
-
-    @patch('jd.services.spider.telegram_spider.app.static_folder', '/fake/static')
-    @patch('os.path.join')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._ensure_directory')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._download_avatar')
-    @patch('jd.services.spider.telegram_spider.TelegramAPIs._process_channel_username')
-    async def test_get_dialog_list_supergroup(self, mock_process_username, mock_download_avatar,
-                                             mock_ensure_directory, mock_path_join):
-        """测试超级群组（megagroup=True的频道）"""
-        mock_path_join.return_value = '/fake/static/images/avatar'
-        mock_process_username.return_value = 'supergroup'
-        mock_download_avatar.return_value = 'supergroup.jpg'
-        
-        # 创建超级群组（megagroup=True的频道）
-        mock_dialog = self.create_mock_dialog('channel')
-        mock_channel_full = self.create_mock_channel_full(megagroup=True)
-        
-        self.mock_client.iter_dialogs.return_value.__aiter__ = AsyncMock(return_value=[mock_dialog])
-        self.mock_client.return_value = mock_channel_full
-        
-        # 执行测试
-        results = []
-        async for result in self.api.get_dialog_list():
-            results.append(result)
-        
-        # 验证结果
-        self.assertEqual(len(results), 1)
-        data = results[0]['data']
-        self.assertEqual(data['megagroup'], 'group')  # megagroup=True应该显示为'group'
-        self.assertEqual(data['group_type'], 'group')
-        self.assertEqual(data['is_public'], 0)  # 超级群组通常没有username
-
-    def test_sync_method(self):
-        """测试同步方法包装器"""
-        # 由于get_dialog_list是异步方法，可能需要同步包装器
-        # 这里测试如果存在同步版本的话
-        
-        # 创建事件循环来运行异步测试
-        async def run_test():
-            # 这里可以运行上面的任何一个异步测试
-            pass
-        
-        # 运行异步测试
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(run_test())
-        finally:
-            loop.close()
-
-    def test_error_handling(self):
-        """测试错误处理"""
-        # 可以添加测试异常情况的测试用例
-        pass
+    print("开始连接Telegram并获取对话列表...")
+    await test_real_get_dialog_list(session_name)
 
 
-def run_dialog_list_tests():
-    """运行get_dialog_list测试的便捷函数"""
-    # 创建测试套件
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    
-    # 添加测试用例
-    suite.addTests(loader.loadTestsFromTestCase(TestGetDialogList))
-    
-    # 运行测试
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
-    
-    # 打印测试结果总结
-    print(f"\nget_dialog_list 测试总结:")
-    print(f"运行测试: {result.testsRun}")
-    print(f"失败: {len(result.failures)}")
-    print(f"错误: {len(result.errors)}")
-    print(f"跳过: {len(result.skipped) if hasattr(result, 'skipped') else 0}")
-    
-    if result.failures:
-        print(f"\n失败的测试:")
-        for test, error in result.failures:
-            print(f"- {test}: {error}")
-    
-    if result.errors:
-        print(f"\n错误的测试:")
-        for test, error in result.errors:
-            print(f"- {test}: {error}")
-    
-    return result.wasSuccessful()
+
+
+
+
 
 
 if __name__ == '__main__':
-    success = run_dialog_list_tests()
-    print(f"\n测试{'成功' if success else '失败'}")
-    exit(0 if success else 1)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n用户中断操作")
+    except Exception as e:
+        print(f"程序执行失败: {e}")
+        sys.exit(1)

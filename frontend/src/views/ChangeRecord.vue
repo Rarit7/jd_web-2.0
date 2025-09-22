@@ -13,8 +13,8 @@
           <div class="filter-content">
             <el-form :model="filterForm" inline>
               <el-form-item label="变动类型">
-                <el-select 
-                  v-model="filterForm.changeType" 
+                <el-select
+                  v-model="filterForm.changeType"
                   placeholder="选择变动类型"
                   clearable
                   style="width: 200px"
@@ -28,6 +28,19 @@
                 </el-select>
               </el-form-item>
             </el-form>
+            <!-- 显示当前筛选的用户ID -->
+            <div v-if="urlUserId" class="current-filter">
+              <el-tag type="info" size="small">
+                筛选用户: {{ urlUserId }}
+              </el-tag>
+            </div>
+            <!-- 去重说明 -->
+            <div class="dedup-notice">
+              <el-tag type="success" size="small" effect="plain">
+                <el-icon><InfoFilled /></el-icon>
+                已自动去重：相同变动仅显示最新记录
+              </el-tag>
+            </div>
           </div>
         </el-card>
       </div>
@@ -235,16 +248,21 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage, ElImageViewer } from 'element-plus'
-import { Avatar, ArrowRight } from '@element-plus/icons-vue'
+import { Avatar, ArrowRight, InfoFilled } from '@element-plus/icons-vue'
 import { formatUTCToLocal } from '@/utils/date'
+import { useRoute } from 'vue-router'
 
 // 变动分析页面
 const activeTab = ref('user')
+const route = useRoute()
 
 // 筛选表单
 const filterForm = ref({
   changeType: 0
 })
+
+// URL参数中的用户ID（用于筛选特定用户的变动记录）
+const urlUserId = ref('')
 
 // 用户变动数据
 const userChangeData = ref([])
@@ -280,12 +298,17 @@ const fetchUserChangeData = async () => {
       page: userPagination.value.page.toString(),
       size: userPagination.value.size.toString()
     })
-    
+
     // 添加变动类型筛选
     if (filterForm.value.changeType > 0) {
       params.append('change_type', filterForm.value.changeType.toString())
     }
-    
+
+    // 添加用户ID筛选（如果URL中有user_id参数）
+    if (urlUserId.value) {
+      params.append('user_id', urlUserId.value)
+    }
+
     const response = await fetch(`/api/change_record/user?${params}`)
     const result = await response.json()
     
@@ -442,7 +465,10 @@ const handleResize = () => {
 onMounted(() => {
   // 防止页面滚动，只允许表格内容滚动
   document.body.style.overflow = 'hidden'
-  
+
+  // 从URL参数中获取user_id
+  urlUserId.value = route.query.user_id as string || ''
+
   fetchUserChangeData()
   calculateTableMaxHeight()
   window.addEventListener('resize', handleResize)
@@ -528,6 +554,22 @@ onUnmounted(() => {
   align-items: center;
   justify-content: flex-start;
   flex: 1;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.current-filter {
+  align-self: flex-start;
+}
+
+.dedup-notice {
+  align-self: flex-start;
+
+  .el-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
 }
 
 .tabs-content {

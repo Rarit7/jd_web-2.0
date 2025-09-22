@@ -8,31 +8,58 @@ from datetime import datetime
 
 @api.route('/change_record/user', methods=['GET'])
 def get_user_change_records():
-    """获取用户信息变动记录"""
+    """获取用户信息变动记录（去重版本）"""
     try:
         page = request.args.get('page', 1, type=int)
         size = request.args.get('size', 20, type=int)
         user_id = request.args.get('user_id', '', type=str)
         change_type = request.args.get('change_type', 0, type=int)
-        
-        # 构建查询
+
+        # 构建基础查询
         query = TgUserInfoChange.query
-        
+
         # 按用户ID过滤
         if user_id:
             query = query.filter(TgUserInfoChange.user_id.like(f'%{user_id}%'))
-        
+
         # 按变动类型过滤
         if change_type > 0:
             query = query.filter(TgUserInfoChange.changed_fields == change_type)
-        
+
+        # 使用子查询进行去重 - 选择每个(user_id, changed_fields, original_value, new_value)组合的最新记录
+        from sqlalchemy import func
+        subquery = db.session.query(
+            func.max(TgUserInfoChange.id).label('max_id')
+        )
+
+        # 应用过滤条件到子查询
+        if user_id:
+            subquery = subquery.filter(TgUserInfoChange.user_id.like(f'%{user_id}%'))
+        if change_type > 0:
+            subquery = subquery.filter(TgUserInfoChange.changed_fields == change_type)
+
+        # 按关键字段分组去重
+        subquery = subquery.group_by(
+            TgUserInfoChange.user_id,
+            TgUserInfoChange.changed_fields,
+            func.coalesce(TgUserInfoChange.original_value, ''),
+            func.coalesce(TgUserInfoChange.new_value, '')
+        ).subquery()
+
+        # 获取去重后的记录
+        distinct_query = TgUserInfoChange.query.filter(
+            TgUserInfoChange.id.in_(
+                db.session.query(subquery.c.max_id)
+            )
+        )
+
         # 分页查询 - 按时间降序，id降序确保最新记录在最前面
-        pagination = query.order_by(
+        pagination = distinct_query.order_by(
             TgUserInfoChange.update_time.desc(),
             TgUserInfoChange.id.desc()
         ).paginate(
-            page=page, 
-            per_page=size, 
+            page=page,
+            per_page=size,
             error_out=False
         )
         

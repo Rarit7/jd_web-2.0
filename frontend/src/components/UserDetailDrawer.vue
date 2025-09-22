@@ -133,6 +133,81 @@
         </div>
 
         <div class="section">
+          <h4>信息变动历史</h4>
+          <div v-loading="changeRecordsLoading" class="change-records-content">
+            <div v-if="userChangeRecords.length === 0 && !changeRecordsLoading" class="empty-records">
+              暂无变动记录
+            </div>
+            <div v-else class="change-records-list">
+              <div
+                v-for="record in userChangeRecords"
+                :key="record.id"
+                class="change-record-item"
+              >
+                <div class="change-header">
+                  <span class="change-type">{{ getChangeTypeText(record.changed_fields) }}</span>
+                  <span class="change-time">{{ formatDate(record.update_time) }}</span>
+                </div>
+                <div class="change-content">
+                  <div class="change-before-after">
+                    <div v-if="record.changed_fields === 3" class="avatar-change">
+                      <div class="change-item">
+                        <span class="change-label">变动前:</span>
+                        <div v-if="!record.original_value" class="empty-avatar">无头像</div>
+                        <el-avatar
+                          v-else
+                          :size="32"
+                          :src="formatAvatarUrl(record.original_value)"
+                          shape="square"
+                          class="change-avatar"
+                        />
+                      </div>
+                      <div class="change-item">
+                        <span class="change-label">变动后:</span>
+                        <div v-if="!record.new_value" class="empty-avatar">无头像</div>
+                        <el-avatar
+                          v-else
+                          :size="32"
+                          :src="formatAvatarUrl(record.new_value)"
+                          shape="square"
+                          class="change-avatar"
+                        />
+                      </div>
+                    </div>
+                    <div v-else class="text-change">
+                      <div class="change-item">
+                        <span class="change-label">变动前:</span>
+                        <span class="change-value before" :class="{ 'username-value': record.changed_fields === 2 }">
+                          <span v-if="record.changed_fields === 2">@</span>{{ record.original_value || '(空)' }}
+                        </span>
+                      </div>
+                      <div class="change-item">
+                        <span class="change-label">变动后:</span>
+                        <span class="change-value after" :class="{ 'username-value': record.changed_fields === 2 }">
+                          <span v-if="record.changed_fields === 2">@</span>{{ record.new_value || '(空)' }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 查看更多按钮 -->
+            <div v-if="userChangeRecords.length > 0" class="view-more-container">
+              <el-button
+                type="text"
+                size="small"
+                @click="navigateToChangeRecord"
+                class="view-more-btn"
+              >
+                查看完整历史 <el-icon><ArrowRight /></el-icon>
+              </el-button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
           <h4>所在群组</h4>
           <div v-loading="groupsLoading" class="groups-content">
             <div v-if="userGroups.length === 0 && !groupsLoading" class="empty-groups">
@@ -307,6 +382,10 @@ const localUserBio = ref('')
 const localUserDetail = ref<UserInfo | null>(null)
 const userDetailLoading = ref(false)
 
+// 变动记录相关数据
+const userChangeRecords = ref<any[]>([])
+const changeRecordsLoading = ref(false)
+
 // 双向绑定visible属性
 const isVisible = computed({
   get: () => props.visible,
@@ -349,6 +428,7 @@ watch([() => props.userDetail, () => props.userId, () => props.visible],
       loadUserStats()
       loadUserTags()
       loadUserGroups()
+      loadUserChangeRecords(currentUserDetail.value.user_id)
     }
   }, 
   { immediate: true }
@@ -625,6 +705,65 @@ const loadUserGroups = async () => {
     console.error('加载用户群组失败:', error)
   } finally {
     groupsLoading.value = false
+  }
+}
+
+// 获取用户信息变动记录
+const loadUserChangeRecords = async (user_id: string) => {
+  if (!user_id) return
+
+  changeRecordsLoading.value = true
+  try {
+    // 只获取最近几条记录作为预览（API已支持去重）
+    const params = new URLSearchParams({
+      page: '1',
+      size: '5', // 只显示最近5条记录
+      user_id: user_id
+    })
+
+    const response = await fetch(`/api/change_record/user?${params}`)
+    const result = await response.json()
+
+    if (result.err_code === 0) {
+      userChangeRecords.value = result.payload.items || []
+    } else {
+      console.error('获取用户变动记录失败:', result.err_msg)
+      userChangeRecords.value = []
+    }
+  } catch (error) {
+    console.error('加载用户变动记录失败:', error)
+    userChangeRecords.value = []
+  } finally {
+    changeRecordsLoading.value = false
+  }
+}
+
+// 变动类型映射
+const getChangeTypeText = (changeType: number): string => {
+  const typeMap: Record<number, string> = {
+    1: '显示名称',
+    2: '用户名',
+    3: '头像',
+    4: '个人简介'
+  }
+  return typeMap[changeType] || '未知'
+}
+
+// 格式化头像URL
+const formatAvatarUrl = (avatar: string): string => {
+  if (!avatar) return ''
+  if (avatar.startsWith('http')) return avatar
+  return `/static/${avatar}`
+}
+
+// 导航到变动记录页面
+const navigateToChangeRecord = () => {
+  const user_id = currentUserDetail.value?.user_id
+  if (user_id) {
+    router.push({
+      path: '/change_record',
+      query: { user_id }
+    })
   }
 }
 
@@ -1034,5 +1173,154 @@ const navigateToUserMessages = (group: UserGroup) => {
     align-items: center;
     justify-content: flex-end;
   }
+}
+
+/* 信息变动历史样式 */
+.change-records-content {
+  padding: 8px 0;
+  min-height: 60px;
+}
+
+.empty-records {
+  text-align: center;
+  color: #999;
+  padding: 20px 0;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.change-records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.change-record-item {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 12px;
+  background: #fafafa;
+  transition: all 0.3s ease;
+}
+
+.change-record-item:hover {
+  border-color: #e6f7ff;
+  background: #f0f8ff;
+}
+
+.change-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.change-type {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1890ff;
+  background: #e6f7ff;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.change-time {
+  font-size: 11px;
+  color: #999;
+}
+
+.change-content {
+  padding-top: 4px;
+}
+
+.change-before-after {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.change-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.change-label {
+  font-size: 12px;
+  color: #666;
+  min-width: 50px;
+  font-weight: 500;
+}
+
+.change-value {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex: 1;
+  word-break: break-all;
+}
+
+.change-value.before {
+  background: #fff2e8;
+  color: #d46b08;
+  border: 1px solid #ffd591;
+}
+
+.change-value.after {
+  background: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.username-value {
+  font-family: monospace;
+  font-weight: 500;
+}
+
+.avatar-change {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.change-avatar {
+  flex-shrink: 0;
+}
+
+.empty-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: #f5f5f5;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #999;
+  text-align: center;
+}
+
+.view-more-container {
+  margin-top: 16px;
+  text-align: center;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.view-more-btn {
+  font-size: 12px;
+  color: #1890ff;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.3s ease;
+}
+
+.view-more-btn:hover {
+  color: #40a9ff;
+  transform: translateX(2px);
 }
 </style>

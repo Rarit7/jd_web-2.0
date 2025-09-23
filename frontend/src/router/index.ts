@@ -190,7 +190,7 @@ const router = createRouter({
           path: '',
           name: 'TagManage',
           component: () => import('@/views/TagManage.vue'),
-          meta: { 
+          meta: {
             title: '标签管理',
             icon: 'Collection',
             roles: [1]

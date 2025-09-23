@@ -120,6 +120,7 @@ celerybeat.pid
 celerybeat-schedule.db
 celerybeat-schedule.dat
 celerybeat-schedule.dir
+jcelery/
 
 # SageMath parsed files
 *.sage.py
@@ -234,3 +235,9 @@ temp_requirements.txt
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Documentation directory
+docs/
+
+# IDE configuration
+.vscode/

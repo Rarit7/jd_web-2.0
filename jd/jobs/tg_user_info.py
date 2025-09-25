@@ -1,13 +1,16 @@
 import datetime
-import logging
 import os
 from typing import Dict, Any
 
 from jd import app, db
 from jd.models.tg_group_user_info import TgGroupUserInfo
 from jd.models.tg_user_info_change import TgUserInfoChange
+from jd.utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.user_info', {
+    'component': 'telegram',
+    'module': 'user_info'
+})
 
 
 class TgUserInfoProcessor:
@@ -22,6 +25,12 @@ class TgUserInfoProcessor:
         self._cache_hits = 0  # 缓存命中次数
         self._cache_misses = 0  # 缓存未命中次数
         self._batch_count = 0  # 处理的批次数
+
+        # 优化的去重缓存机制
+        self._change_dedup_cache = {}  # 去重缓存 {(user_id, field, old_val, new_val): timestamp}
+        self._recent_changes_cache = {}  # 最近变更记录缓存 {user_id: [change_records]}
+        self._pending_changes = []  # 待写入的变更记录
+        self._time_window_hours = 2  # 去重时间窗口（小时）
     
     @staticmethod
     def _safe_str(value) -> str:
@@ -52,16 +61,71 @@ class TgUserInfoProcessor:
         if self._cache_hits + self._cache_misses > 0:
             hit_rate = self._cache_hits / (self._cache_hits + self._cache_misses) * 100
             logger.info(f"用户缓存统计: 批次数={self._batch_count}, 命中率={hit_rate:.1f}% ({self._cache_hits}/{self._cache_hits + self._cache_misses})")
-        
+
+        # 在清空缓存前，批量提交待写入的变更记录
+        self._flush_pending_changes()
+
         self._user_cache.clear()
         self._processed_users.clear()
         self._batch_chat_id = None
         # 重置统计信息
         self._cache_hits = 0
-        self._cache_misses = 0 
+        self._cache_misses = 0
         self._batch_count = 0
+
+        # 清空去重缓存（保留一定时间内的记录）
+        self._cleanup_dedup_cache()
+
         logger.debug("批次级用户缓存已清空")
     
+    def _cleanup_dedup_cache(self):
+        """清理过期的去重缓存记录"""
+        try:
+            current_time = datetime.datetime.now()
+            window_threshold = current_time - datetime.timedelta(hours=self._time_window_hours)
+
+            # 清理过期的去重缓存
+            expired_keys = [
+                key for key, timestamp in self._change_dedup_cache.items()
+                if timestamp < window_threshold
+            ]
+            for key in expired_keys:
+                del self._change_dedup_cache[key]
+
+            # 清理过期的最近变更缓存
+            for user_id in list(self._recent_changes_cache.keys()):
+                self._recent_changes_cache[user_id] = [
+                    record for record in self._recent_changes_cache[user_id]
+                    if record['update_time'] >= window_threshold
+                ]
+                # 如果该用户没有最近的记录，删除该用户的缓存
+                if not self._recent_changes_cache[user_id]:
+                    del self._recent_changes_cache[user_id]
+
+            if expired_keys:
+                logger.debug(f"清理了 {len(expired_keys)} 条过期的去重缓存记录")
+
+        except Exception as e:
+            logger.error(f"清理去重缓存失败: {e}")
+
+    def _flush_pending_changes(self):
+        """批量提交待写入的变更记录"""
+        if not self._pending_changes:
+            return
+
+        try:
+            # 批量插入待写入的变更记录
+            db.session.add_all(self._pending_changes)
+            # 注意：这里只是添加到session中，实际提交由外层调用方控制
+            logger.debug(f"批量添加了 {len(self._pending_changes)} 条用户变更记录到session")
+            self._pending_changes.clear()
+
+        except Exception as e:
+            logger.error(f"批量添加变更记录失败: {e}")
+            # 清空待写入队列，避免重复处理
+            self._pending_changes.clear()
+            raise  # 重新抛出异常，让外层处理
+
     async def prepare_batch_user_cache(self, batch_messages: list, chat_id: int):
         """批量预处理用户信息缓存，减少重复数据库查询
         
@@ -99,17 +163,20 @@ class TgUserInfoProcessor:
                 TgGroupUserInfo.chat_id == str(chat_id),
                 TgGroupUserInfo.user_id.in_(uncached_user_ids)
             ).all()
-            
+
             # 缓存已存在的用户
             for user in existing_users:
                 self._user_cache[user.user_id] = user
-            
+
             # 为不存在的用户ID缓存None值，避免重复查询
             cached_user_ids = {user.user_id for user in existing_users}
             for user_id in uncached_user_ids:
                 if user_id not in cached_user_ids:
                     self._user_cache[user_id] = None
-            
+
+            # 批量预取这些用户的最近变更记录用于去重
+            self._preload_recent_changes(unique_user_ids)
+
             logger.debug(f"批量用户缓存完成: 已存在={len(existing_users)}, 新用户={len(uncached_user_ids)-len(existing_users)}")
             
         except Exception as e:
@@ -117,6 +184,36 @@ class TgUserInfoProcessor:
             # 发生错误时，为所有用户ID缓存None，避免后续查询
             for user_id in uncached_user_ids:
                 self._user_cache[user_id] = None
+
+    def _preload_recent_changes(self, user_ids: set):
+        """批量预取用户的最近变更记录"""
+        try:
+            current_time = datetime.datetime.now()
+            window_start = current_time - datetime.timedelta(hours=self._time_window_hours)
+
+            # 批量查询这些用户最近的变更记录
+            recent_changes = TgUserInfoChange.query.filter(
+                TgUserInfoChange.user_id.in_(user_ids),
+                TgUserInfoChange.update_time >= window_start
+            ).all()
+
+            # 按用户ID分组缓存
+            for change in recent_changes:
+                user_id = change.user_id
+                if user_id not in self._recent_changes_cache:
+                    self._recent_changes_cache[user_id] = []
+
+                self._recent_changes_cache[user_id].append({
+                    'changed_fields': change.changed_fields,
+                    'original_value': change.original_value,
+                    'new_value': change.new_value,
+                    'update_time': change.update_time
+                })
+
+            logger.debug(f"预取了 {len(recent_changes)} 条最近变更记录用于去重")
+
+        except Exception as e:
+            logger.error(f"预取最近变更记录失败: {e}")
     
     async def save_user_info_from_message(self, data: Dict[str, Any], chat_id: int) -> None:
         """从聊天消息中提取发言人信息并保存到用户信息表"""
@@ -301,7 +398,7 @@ class TgUserInfoProcessor:
     
     def _record_user_info_change(self, user_id: str, changed_field: int, old_value: str, new_value: str) -> None:
         """
-        记录用户信息变化（带时间窗口去重）
+        记录用户信息变化（优化的基于内存缓存的去重）
         :param user_id: 用户ID
         :param changed_field: 变化字段类型
         :param old_value: 原值
@@ -316,38 +413,69 @@ class TgUserInfoProcessor:
             changed_field = int(changed_field) if changed_field else 0
             current_time = datetime.datetime.now()
 
-            # 创建时间窗口（2小时内的相同变动将被去重）
-            time_window_hours = 2
-            window_start = current_time - datetime.timedelta(hours=time_window_hours)
+            # 标准化值
+            old_value_str = str(old_value) if old_value else ''
+            new_value_str = str(new_value) if new_value else ''
+            user_id_str = str(user_id)
 
-            # 检查时间窗口内是否已存在相同的变动记录
-            existing_record = TgUserInfoChange.query.filter(
-                TgUserInfoChange.user_id == str(user_id),
-                TgUserInfoChange.changed_fields == changed_field,
-                TgUserInfoChange.original_value == (str(old_value) if old_value else ''),
-                TgUserInfoChange.new_value == (str(new_value) if new_value else ''),
-                TgUserInfoChange.update_time >= window_start
-            ).first()
+            # 创建去重键
+            dedup_key = (user_id_str, changed_field, old_value_str, new_value_str)
 
-            if existing_record:
-                logger.debug(f'用户 {user_id} 在 {time_window_hours} 小时内已存在相同变动记录，跳过重复记录')
-                return
+            # 首先检查内存去重缓存
+            if dedup_key in self._change_dedup_cache:
+                cached_time = self._change_dedup_cache[dedup_key]
+                time_diff = (current_time - cached_time).total_seconds()
+                if time_diff < self._time_window_hours * 3600:
+                    logger.debug(f'用户 {user_id} 变更已在内存缓存中，跳过重复记录（时间差: {time_diff/60:.1f}分钟）')
+                    return
 
-            # 创建新的变动记录
+            # 检查预加载的最近变更缓存
+            if user_id_str in self._recent_changes_cache:
+                window_start = current_time - datetime.timedelta(hours=self._time_window_hours)
+                for cached_change in self._recent_changes_cache[user_id_str]:
+                    if (cached_change['changed_fields'] == changed_field and
+                        cached_change['original_value'] == old_value_str and
+                        cached_change['new_value'] == new_value_str and
+                        cached_change['update_time'] >= window_start):
+
+                        logger.debug(f'用户 {user_id} 变更已在最近缓存中，跳过重复记录')
+                        # 同时更新内存去重缓存
+                        self._change_dedup_cache[dedup_key] = cached_change['update_time']
+                        return
+
+            # 创建新的变动记录（暂时不直接提交到数据库）
             change_record = TgUserInfoChange(
-                user_id=str(user_id),
+                user_id=user_id_str,
                 changed_fields=changed_field,
-                original_value=str(old_value) if old_value else '',
-                new_value=str(new_value) if new_value else '',
+                original_value=old_value_str,
+                new_value=new_value_str,
                 update_time=current_time
             )
-            db.session.add(change_record)
-            db.session.flush()
+
+            # 添加到待写入队列
+            self._pending_changes.append(change_record)
+
+            # 更新内存去重缓存
+            self._change_dedup_cache[dedup_key] = current_time
+
+            # 更新最近变更缓存
+            if user_id_str not in self._recent_changes_cache:
+                self._recent_changes_cache[user_id_str] = []
+            self._recent_changes_cache[user_id_str].append({
+                'changed_fields': changed_field,
+                'original_value': old_value_str,
+                'new_value': new_value_str,
+                'update_time': current_time
+            })
+
             logger.info(f'记录用户信息变化: user_id={user_id}, field={changed_field}, 变动: "{old_value}" -> "{new_value}"')
+
+            # 如果待写入队列过大，立即提交一批
+            if len(self._pending_changes) >= 50:
+                self._flush_pending_changes()
 
         except Exception as e:
             logger.error(f'记录用户信息变化失败: {e}')
-            db.session.rollback()
 
     async def save_user_info_from_message_batch(self, batch_messages: list, chat_id: int) -> None:
         """批量处理消息中的用户信息，优化版本"""
@@ -409,7 +537,12 @@ class TgUserInfoProcessor:
             if new_users:
                 db.session.add_all(new_users)
                 logger.debug(f'批量创建 {len(new_users)} 个新用户信息记录')
-                
+
+            # 在批量处理结束时提交所有待写入的变更记录
+            self._flush_pending_changes()
+
         except Exception as e:
             logger.error(f'批量处理用户信息失败: {e}')
-            db.session.rollback()
+            # 清空待写入队列，避免重复处理
+            self._pending_changes.clear()
+            raise  # 重新抛出异常，让外层统一处理事务

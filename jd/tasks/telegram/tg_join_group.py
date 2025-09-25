@@ -1,4 +1,4 @@
-import logging
+from jd.utils.logging_config import get_logger
 
 from jCelery import celery
 from jd import db
@@ -7,7 +7,7 @@ from jd.models.tg_group_session import TgGroupSession
 from jd.models.tg_group_status import TgGroupStatus
 from jd.services.spider.tg import TgService
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.tasks.tg.tg_join_group', {'component': 'telegram', 'module': 'join_group'})
 
 
 @celery.task

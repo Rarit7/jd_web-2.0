@@ -23,13 +23,13 @@ beat_schedule = {
     # },
 
     # Telegram群聊历史增量获取任务 - 每10分钟执行一次（协程模式）
-    # 'tg_chat_history_job': {
-    #     'task': 'jd.tasks.first.tg_history_job.fetch_tg_history_job',
-    #     'schedule': timedelta(minutes=10),
-    #     'options': {
-    #         'expires': 3600,  # 任务1小时后过期
-    #     }
-    # },
+    'tg_chat_history_job': {
+        'task': 'jd.tasks.first.tg_history_job.fetch_tg_history_job',
+        'schedule': timedelta(minutes=10),
+        'options': {
+            'expires': 3600,  # 任务1小时后过期
+        }
+    },
 
     # 'tg_account_history_job': {
     #     'task': 'jd.tasks.first.tg_history_job.fetch_account_history_job',
@@ -41,11 +41,11 @@ beat_schedule = {
     # }
 
     # 每日备份群组统计数据任务 - 每天凌晨00:00执行
-    # 'daily_backup_group_stats': {
-    #     'task': 'jd.tasks.telegram.tg_daily_backup.daily_backup_group_stats',
-    #     'schedule': crontab(minute=0, hour=0),  # 每天00:00执行
-    #     'options': {
-    #         'expires': 3600,  # 任务1小时后过期
-    #     }
-    # },
+    'daily_backup_group_stats': {
+        'task': 'jd.tasks.telegram.tg_daily_backup.daily_backup_group_stats',
+        'schedule': crontab(minute=0, hour=0),  # 每天00:00执行
+        'options': {
+            'expires': 3600,  # 任务1小时后过期
+        }
+    },
 }

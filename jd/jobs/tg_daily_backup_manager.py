@@ -16,7 +16,7 @@ Telegram群组统计数据每日备份管理脚本
 """
 
 import argparse
-import logging
+from jd.utils.logging_config import get_logger
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -31,7 +31,7 @@ from jd.tasks.telegram.tg_daily_backup import (
     get_backup_stats
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.daily_backup_manager', {'component': 'telegram', 'module': 'daily_backup_manager'})
 
 
 def setup_logging():

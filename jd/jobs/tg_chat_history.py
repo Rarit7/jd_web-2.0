@@ -1,11 +1,14 @@
 import asyncio
-import logging
 
 from jd.models.tg_group_status import TgGroupStatus
 from jd.jobs.tg_base_history_fetcher import BaseTgHistoryFetcher
+from jd.utils.logging_config import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.chat_history', {
+    'component': 'telegram',
+    'module': 'chat_history'
+})
 
 
 class ExsitedGroupHistoryFetcher(BaseTgHistoryFetcher):

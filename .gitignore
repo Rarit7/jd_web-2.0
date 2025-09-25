@@ -121,6 +121,7 @@ celerybeat-schedule.db
 celerybeat-schedule.dat
 celerybeat-schedule.dir
 jcelery/
+jCelery/celeryconfig.py
 
 # SageMath parsed files
 *.sage.py

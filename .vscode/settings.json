@@ -1,3 +1,25 @@
 {
-    "git.ignoreLimitWarning": true
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/node_modules/**": true,
+    "**/logs/**": true,
+    "**/log/**": true,
+    "**/*.log": true,
+    "**/__pycache__/**": true,
+    "**/static/dist/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/logs": true,
+    "**/log": true,
+    "**/*.log": true,
+    "**/__pycache__": true,
+    "**/static/dist": true
+  },
+  "python.defaultInterpreterPath": "/home/ec2-user/miniconda3/envs/sdweb2/bin/python",
+  "git.autorefresh": false,
+  "editor.minimap.enabled": false,
+  "terminal.integrated.persistentSessionReviveProcess": "never",
+  "extensions.autoUpdate": false,
+  "telemetry.enableTelemetry": false
 }

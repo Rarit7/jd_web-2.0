@@ -1,11 +1,11 @@
-import logging
+from jd.utils.logging_config import get_logger
 from datetime import date, datetime
 
 from jCelery import celery
 from jd import app, db
 from jd.models.tg_group_status import TgGroupStatus
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.tasks.tg.tg_daily_backup', {'component': 'telegram', 'module': 'daily_backup'})
 
 
 @celery.task(bind=True, queue='jd.celery.telegram')

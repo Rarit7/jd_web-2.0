@@ -1,13 +1,16 @@
 import asyncio
 import datetime
-import logging
 from zoneinfo import ZoneInfo
 
 from jd import app, db
 from jd.models.tg_group_chat_history import TgGroupChatHistory
 from jd.jobs.tg_base_history_fetcher import BaseTgHistoryFetcher
+from jd.utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.new_history', {
+    'component': 'telegram',
+    'module': 'new_history'
+})
 
 
 class NewJoinedGroupHistoryFetcher(BaseTgHistoryFetcher):

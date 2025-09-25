@@ -5,7 +5,7 @@
 
 import asyncio
 import datetime
-import logging
+from jd.utils.logging_config import get_logger
 import os
 from zoneinfo import ZoneInfo
 
@@ -17,7 +17,7 @@ from jd.services.spider.tg import TgService
 from jd.services.spider.telegram_spider import TelegramAPIs
 from jd.tasks.telegram.tg import fetch_group_user_info
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.person_dialog', {'component': 'telegram', 'module': 'person_dialog'})
 
 
 class PersonDialogJob:

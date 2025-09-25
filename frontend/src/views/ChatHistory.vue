@@ -464,6 +464,7 @@ interface Chat {
   remark: string
   photo: string
   group_type: number
+  records_count: number
 }
 
 interface DocumentInfo {
@@ -583,7 +584,8 @@ const fetchChatList = async () => {
         tag: group.tag,
         remark: group.remark,
         photo: group.photo,
-        group_type: group.group_type
+        group_type: group.group_type,
+        records_count: group.records_count || 0
       }))
 
       // 不再获取私人聊天列表，只显示群组聊天
@@ -1174,24 +1176,26 @@ const filteredChats = computed(() => {
   )
 })
 
-// 新增：按类型分组的聊天列表，过滤掉私人聊天
+// 新增：按类型分组的聊天列表，过滤掉私人聊天和消息数为0的群组
 const groupedChats = computed(() => {
   const groups = {
     private: [] as Chat[],
     group: [] as Chat[],
     channel: [] as Chat[]
   }
-  
+
   filteredChats.value.forEach(chat => {
-    // 跳过私人聊天（group_type === 0）
-    if (chat.group_type === 1) {
-      groups.group.push(chat)
-    } else if (chat.group_type === 2) {
-      groups.channel.push(chat)
+    // 跳过私人聊天（group_type === 0）和消息数为0的群组
+    if (chat.records_count > 0) {
+      if (chat.group_type === 1) {
+        groups.group.push(chat)
+      } else if (chat.group_type === 2) {
+        groups.channel.push(chat)
+      }
     }
     // 移除了 group_type === 0 的处理，不再显示私人聊天
   })
-  
+
   return groups
 })
 

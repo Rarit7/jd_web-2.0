@@ -12,6 +12,8 @@ from jd.models.tg_group import TgGroup
 from jd.models.tg_group_chat_history import TgGroupChatHistory
 from jd.models.tg_group_tag import TgGroupTag
 from jd.models.tg_group_status import TgGroupStatus
+from jd.models.tg_group_session import TgGroupSession
+from jd.models.tg_account import TgAccount
 from jd.services.role_service.role import ROLE_SUPER_ADMIN, RoleService
 from jd.services.spider.tg import TgService
 from jd.services.tag import TagService
@@ -35,7 +37,24 @@ def tg_group_list_json():
 
     query = TgGroup.query
     if account_id:
-        query = query.filter(TgGroup.account_id == account_id)
+        # 只通过TgGroupSession表找到该账户所在的群组
+        # 1. 先从TgAccount获取该账户的user_id
+        account = TgAccount.query.filter(TgAccount.id == account_id).first()
+        if account and account.user_id:
+            # 2. 从TgGroupSession找到该user_id对应的所有chat_id
+            session_chat_ids = db.session.query(TgGroupSession.chat_id)\
+                .filter(TgGroupSession.user_id == account.user_id)\
+                .distinct().all()
+            if session_chat_ids:
+                chat_ids_list = [chat_id[0] for chat_id in session_chat_ids]
+                # 只显示在TgGroupSession中有记录的群组
+                query = query.filter(TgGroup.chat_id.in_(chat_ids_list))
+            else:
+                # 如果该账户没有在TgGroupSession中有记录，返回空结果
+                query = query.filter(TgGroup.id == -1)
+        else:
+            # 账户不存在或没有user_id，返回空结果
+            query = query.filter(TgGroup.id == -1)
     if group_name:
         query = query.filter(TgGroup.title.like('%' + group_name + '%'))
     if chat_id:
@@ -122,12 +141,12 @@ def tg_group_list_json():
             'desc': g.desc,
             'tag': tag_text,
             'tag_id_list': ','.join(parse_tag) if parse_tag else '',
-            'created_at': g.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_at': g.created_at.strftime('%Y-%m-%d %H:%M:%S') if g.created_at else '',
             'account_id': g.account_id,
             'photo': g.avatar_path,
             'title': g.title,
             'remark': g.remark,
-            'latest_postal_time': latest_postal_time,
+            'latest_postal_time': latest_postal_time.strftime('%Y-%m-%d %H:%M:%S') if latest_postal_time else '',
             'three_days_ago': 1 if latest_postal_time and latest_postal_time < (
                     datetime.datetime.now() - datetime.timedelta(days=3)) else 0,
             'group_type': g.group_type,
@@ -141,14 +160,9 @@ def tg_group_list_json():
             continue
         data.append(d)
     # 按最后发言时间降序排列（最新的在前面），没有发言记录的放在最后
-    data = sorted(data, key=lambda x: x['latest_postal_time'], reverse=True)
+    data = sorted(data, key=lambda x: x['latest_postal_time'] if x['latest_postal_time'] else '', reverse=True)
     data.extend(no_chat_history_group)
-    for d in data:
-        if not d['latest_postal_time']:
-            continue
-        d['latest_postal_time'] = d['latest_postal_time'].strftime('%Y-%m-%d %H:%M:%S') if d[
-            'latest_postal_time'] else ''
-    
+
     return jsonify({
         'err_code': 0,
         'err_msg': '',
@@ -281,7 +295,24 @@ def tg_group_download():
 
     query = TgGroup.query
     if account_id:
-        query = query.filter(TgGroup.account_id == account_id)
+        # 只通过TgGroupSession表找到该账户所在的群组
+        # 1. 先从TgAccount获取该账户的user_id
+        account = TgAccount.query.filter(TgAccount.id == account_id).first()
+        if account and account.user_id:
+            # 2. 从TgGroupSession找到该user_id对应的所有chat_id
+            session_chat_ids = db.session.query(TgGroupSession.chat_id)\
+                .filter(TgGroupSession.user_id == account.user_id)\
+                .distinct().all()
+            if session_chat_ids:
+                chat_ids_list = [chat_id[0] for chat_id in session_chat_ids]
+                # 只显示在TgGroupSession中有记录的群组
+                query = query.filter(TgGroup.chat_id.in_(chat_ids_list))
+            else:
+                # 如果该账户没有在TgGroupSession中有记录，返回空结果
+                query = query.filter(TgGroup.id == -1)
+        else:
+            # 账户不存在或没有user_id，返回空结果
+            query = query.filter(TgGroup.id == -1)
     if group_name:
         query = query.filter(TgGroup.title.like('%' + group_name + '%'))
     if chat_id:
@@ -350,12 +381,12 @@ def tg_group_download():
             'desc': g.desc,
             'tag': tag_text,
             'tag_id_list': ','.join(parse_tag) if parse_tag else '',
-            'created_at': g.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_at': g.created_at.strftime('%Y-%m-%d %H:%M:%S') if g.created_at else '',
             'account_id': g.account_id,
             'photo': g.avatar_path,
             'title': g.title,
             'remark': g.remark,
-            'latest_postal_time': latest_postal_time,
+            'latest_postal_time': latest_postal_time.strftime('%Y-%m-%d %H:%M:%S') if latest_postal_time else '',
             'three_days_ago': 1 if latest_postal_time and latest_postal_time < (
                     datetime.datetime.now() - datetime.timedelta(days=3)) else 0,
             'group_type': g.group_type,
@@ -365,13 +396,8 @@ def tg_group_download():
             continue
         data.append(d)
     # 按最后发言时间降序排列（最新的在前面），没有发言记录的放在最后
-    data = sorted(data, key=lambda x: x['latest_postal_time'], reverse=True)
+    data = sorted(data, key=lambda x: x['latest_postal_time'] if x['latest_postal_time'] else '', reverse=True)
     data.extend(no_chat_history_group)
-    for d in data:
-        if not d['latest_postal_time']:
-            continue
-        d['latest_postal_time'] = d['latest_postal_time'].strftime('%Y-%m-%d %H:%M:%S') if d[
-            'latest_postal_time'] else ''
 
     result = []
     for d in data:

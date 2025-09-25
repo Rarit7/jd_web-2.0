@@ -1,231 +1,234 @@
 # CLAUDE.md
 
-This file provides comprehensive guidance for Claude Code when working with the chemical industry data aggregation and Telegram monitoring system.
+这是一个基于 Flask + Vue.js 的化工行业数据聚合与 Telegram 监控系统的完整开发指南。
 
-## Project Overview
+## 项目概述
 
-A sophisticated Flask-based web application that combines chemical industry intelligence gathering, Telegram monitoring, and competitive analysis. The system leverages distributed task processing via Celery and is actively migrating from traditional Jinja2 templates to a modern Vue.js SPA frontend.
+**JD Web** 是一个专业的化工行业情报收集与 Telegram 群组监控平台，集成了多平台数据爬取、实时消息监控、竞争分析等功能。系统采用现代化的前后端分离架构，利用分布式任务队列处理复杂的数据采集和分析任务。
 
-**Core Capabilities:**
-- Multi-platform chemical data scraping (7+ specialized scrapers)
-- Real-time Telegram group monitoring and chat history analysis
-- Automated competitive intelligence gathering
-- Role-based access control (RBAC) with user management
-- Distributed task scheduling and processing
+**核心能力：**
+- 多平台化工数据爬取（百度、Google、ChemicalBook、Molbase、1688等）
+- 实时 Telegram 群组监控和聊天历史分析
+- 自动化竞争情报收集
+- 基于角色的访问控制（RBAC）
+- 分布式任务调度与处理
 
-## Quick Start Commands
+## 快速启动命令
 
-### Development Environment Setup
+### 环境管理
 ```bash
-# Complete system startup (recommended for development)
+# 激活 conda 环境（项目使用 sdweb2）
+conda activate sdweb2
+
+# 完整系统启动（推荐用于开发）
 bash start.sh -a
 
-# Stop all services cleanly
+# 清理环境并启动所有服务
+bash start.sh -a -q
+
+# 优雅关闭所有服务
 bash stop.sh
-
-# Frontend development server
-cd frontend && npm install && npm run dev
-
-# Initialize Telegram integration (required on first setup)
-python -m scripts.job init_tg
-
-# Database initialization
-bash scripts/init_database.sh
-
-# Create conda environment
-bash scripts/setup_conda_env.sh
 ```
 
-### Service Management
+### 分模块启动
 ```bash
-# Selective service startup
-bash start.sh -w    # Web server only (Flask app on port 8981)
-bash start.sh -c    # Celery workers only
+# 仅启动 Web 服务器
+bash start.sh -w                # Flask API 服务器 (端口 8931)
 
-# Manual service control
-python web.py                                              # Flask application
-celery -A scripts.worker:celery worker -Q jd.celery.first -c 6    # Data processing queue
-celery -A scripts.worker:celery worker -Q jd.celery.telegram -c 1  # Telegram operations
-celery -A scripts.worker:celery beat                       # Task scheduler
+# 仅启动 Celery 任务队列
+bash start.sh -c               # 后台任务处理
 
-# Frontend development
-cd frontend && npm run dev                                 # Vue.js dev server (port 8930)
+# 仅启动前端开发服务器
+bash start.sh -f               # Vue.js 开发服务器 (端口 8930)
 ```
 
-### Common Development Tasks
+### 手动服务控制
 ```bash
-# Database operations
-python -m utils.insert_dml_data      # Insert test data
-python -m utils.delete_chat_history  # Clean chat history
+# Flask 应用
+python -m web                  # 启动 Web API 服务器
 
-# Job execution
-python -m jd.jobs.init_roles_users   # Initialize user roles
-python -m jd.jobs.job_queue_manager  # Queue management
+# Celery 工作队列
+celery -A scripts.worker:celery worker -Q jd.celery.first -c 6        # 数据处理队列
+celery -A scripts.worker:celery worker -Q jd.celery.telegram -c 1     # Telegram 操作队列
+celery -A scripts.worker:celery beat                                   # 任务调度器
 
-# Testing
-pytest                               # Run test suite
-python jd/tasks/test_base_task.py   # Test base task functionality
+# 前端开发
+cd frontend && npm install && npm run dev                              # Vue.js 开发服务器
 ```
 
-## System Architecture
+### 常用开发任务
+```bash
+# 初始化与配置
+python -m scripts.job init_tg                    # 初始化 Telegram 集成
+python -m jd.jobs.init_roles_users              # 初始化用户角色
+bash scripts/init_database.sh                   # 数据库初始化
 
-### High-Level Architecture
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Client Layer (Browser)                       │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────┴───────────────────────────────────┐
-│            Frontend (Vue.js 3 + TypeScript)                    │
-│              Element Plus UI + Vite (port 8930)                │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ REST APIs
-┌─────────────────────────────┴───────────────────────────────────┐
-│               Backend (Flask + SQLAlchemy)                     │
-│                    API Server (port 8981)                      │
-└─────────────┬─────────────────────────────┬───────────────────┘
-              │                             │
-┌─────────────┴──────────────┐   ┌──────────┴──────────────────┐
-│     Celery Workers         │   │      Database Layer         │
-│  - jd.celery.first (6)     │   │    MySQL + Redis Cache      │
-│  - jd.celery.telegram (1)  │   │                             │
-└────────────────────────────┘   └─────────────────────────────┘
+# 数据操作
+python -m utils.insert_dml_data                 # 插入测试数据
+python -m utils.delete_chat_history             # 清理聊天历史
+
+# 任务管理
+python -m jd.jobs.job_queue_manager             # 队列管理
+python -m jd.jobs.auto_tagging                  # 自动标签任务
+
+# 测试与检查
+pytest                                          # 运行测试套件
+python jd/tasks/test_base_task.py              # 测试基础任务功能
 ```
 
-### Directory Structure
+## 系统架构
+
+### 技术栈概览
+```
+┌─────────────────────────────────────────────────────────┐
+│                   浏览器客户端                           │
+└─────────────────────┬───────────────────────────────────┘
+                      │ HTTP/WebSocket
+┌─────────────────────┴───────────────────────────────────┐
+│          前端 (Vue.js 3 + TypeScript)                  │
+│     Element Plus UI + Vite (开发端口 8930)             │
+└─────────────────────┬───────────────────────────────────┘
+                      │ RESTful API
+┌─────────────────────┴───────────────────────────────────┐
+│              后端 (Flask + SQLAlchemy)                 │
+│                API 服务器 (端口 8931)                   │
+└─────────┬───────────────────────────────┬───────────────┘
+          │                               │
+┌─────────┴────────────┐       ┌──────────┴─────────────────┐
+│   Celery 任务队列     │       │        数据层              │
+│ • first队列 (6工作者) │       │   MySQL + Redis 缓存       │
+│ • telegram队列 (1工作者)│      │                           │
+└──────────────────────┘       └────────────────────────────┘
+```
+
+### 目录结构
 ```
 jd_web/
-├── web.py                      # Flask application entry point
-├── config.py                   # Application configuration
-├── start.sh / stop.sh          # Service management scripts
-├── requirements.txt            # Python dependencies
-├── package.json               # Node.js dependencies
+├── web.py                     # Flask 应用入口点
+├── config.py                  # 应用配置文件
+├── start.sh / stop.sh         # 服务管理脚本
+├── requirements.txt           # Python 依赖
 │
-├── jd/                        # Main backend application
-│   ├── __init__.py            # Flask app factory with auto-blueprint loading
-│   ├── models/                # SQLAlchemy ORM models
-│   │   ├── tg_group.py        # Telegram group management
-│   │   ├── tg_account.py      # Telegram account management
-│   │   ├── secure_user.py     # User authentication
-│   │   └── ...                # Other domain models
-│   ├── services/              # Business logic layer (NO database commits)
-│   │   └── spider/            # Web scraping services
-│   ├── views/api/             # RESTful API endpoints
-│   │   ├── tg/                # Telegram-related APIs
-│   │   ├── user/              # User management APIs
-│   │   └── ...                # Other API modules
-│   ├── jobs/                  # Standalone job scripts
-│   │   ├── tg_*.py            # Telegram operation scripts
-│   │   └── init_*.py          # Initialization scripts
-│   └── tasks/                 # Celery task definitions
-│       ├── telegram/          # Telegram processing tasks
-│       └── first/             # Data processing tasks
+├── jd/                       # 主后端应用
+│   ├── __init__.py           # Flask 应用工厂
+│   ├── models/               # SQLAlchemy ORM 模型
+│   ├── services/             # 业务逻辑层（无数据库提交）
+│   ├── views/api/            # RESTful API 端点
+│   ├── jobs/                 # 独立任务脚本
+│   ├── tasks/                # Celery 任务定义
+│   ├── helpers/              # 辅助工具函数
+│   └── utils/                # 通用工具模块
 │
-├── frontend/                  # Vue.js SPA application
+├── frontend/                 # Vue.js SPA 应用
 │   ├── src/
-│   │   ├── views/             # Page-level components
-│   │   ├── components/        # Reusable UI components
-│   │   ├── api/               # HTTP client services
-│   │   ├── store/             # Pinia state management
-│   │   └── router/            # Vue Router configuration
-│   ├── package.json           # Frontend dependencies
-│   └── vite.config.ts         # Vite build configuration
+│   │   ├── views/            # 页面级组件
+│   │   ├── components/       # 可复用 UI 组件
+│   │   ├── api/              # HTTP 客户端服务
+│   │   ├── store/            # Pinia 状态管理
+│   │   ├── router/           # Vue Router 配置
+│   │   ├── utils/            # 前端工具函数
+│   │   └── types/            # TypeScript 类型定义
+│   ├── package.json          # 前端依赖管理
+│   └── vite.config.ts        # Vite 构建配置
 │
-├── scripts/                   # Utility scripts and job runners
-├── tests/                     # Test suite
-├── utils/                     # Utility scripts
-└── dbrt/                      # Database schema (DDL/DML)
+├── scripts/                  # 实用脚本和任务运行器
+├── tests/                    # 测试套件
+├── static/                   # 静态文件服务
+├── logs/                     # 应用日志文件
+├── dbrt/                     # 数据库架构 (DDL/DML)
+└── utils/                    # 系统级实用脚本
 ```
 
-## Core Features & Components
+## 核心功能模块
 
-### Data Processing Pipeline
-- **Chemical Intelligence**:
-  - Multi-platform scrapers (Baidu, ChemicalBook, Molbase, 1688, etc.)
-  - Automated product data collection and analysis
-  - Competitive pricing intelligence
-  - Market trend analysis
+### 数据处理管道
+- **化工情报系统**：
+  - 多平台爬虫引擎（百度、Google、ChemicalBook、Molbase、1688等）
+  - 自动化产品数据采集与分析
+  - 竞争定价情报收集
+  - 市场趋势分析与报告
 
-- **Telegram Integration**:
-  - Real-time group monitoring and user activity tracking
-  - Chat history collection and analysis
-  - File download and processing
-  - User information extraction and management
+- **Telegram 集成**：
+  - 实时群组监控与用户活动跟踪
+  - 聊天历史收集与分析
+  - 文件下载与自动处理
+  - 用户信息提取与管理
 
-- **Task Queue System**:
-  - `jd.celery.first`: Heavy data processing (6 concurrent workers)
-  - `jd.celery.telegram`: Telegram operations (1 worker for rate limiting)
-  - Celery Beat: Automated task scheduling
+- **任务队列系统**：
+  - `jd.celery.first`: 重型数据处理（6个并发工作者）
+  - `jd.celery.telegram`: Telegram 操作（1个工作者，支持速率限制）
+  - Celery Beat: 自动化任务调度
 
-### Frontend Architecture (Vue.js 3)
-- **Modern Stack**: Composition API with TypeScript for type safety
-- **UI Framework**: Element Plus for consistent, professional interface
-- **Build System**: Vite for fast development and optimized builds
-- **Routing**: Vue Router with lazy-loaded components
-- **State Management**: Pinia for global application state
-- **HTTP Client**: Axios with centralized API configuration
+### 前端架构（Vue.js 3）
+- **现代化技术栈**: Composition API + TypeScript，提供类型安全
+- **UI 框架**: Element Plus，确保一致的专业界面
+- **构建系统**: Vite，快速开发与优化构建
+- **路由管理**: Vue Router，支持懒加载组件
+- **状态管理**: Pinia，全局应用状态管理
+- **HTTP 客户端**: Axios，集中化 API 配置
+- **样式方案**: UnoCSS + TailwindCSS + SCSS
 
-### Authentication & Security
-- **Multi-tier Auth**: Session-based with optional JWT support
-- **RBAC System**: Role-based access control with granular permissions
-- **API Protection**: Custom `ApiBlueprint` with automatic authentication
-- **Secure Configuration**: Encrypted database connections and secure defaults
+### 认证与安全
+- **多层认证**: 基于 Session 的认证，支持可选 JWT
+- **RBAC 系统**: 基于角色的访问控制，细粒度权限管理
+- **API 保护**: 自定义 `ApiBlueprint`，自动认证检查
+- **安全配置**: 加密数据库连接，安全默认设置
 
-## Development Guidelines
+## 开发指南
 
-### API Standards & Conventions
+### API 标准与约定
 ```json
-// Standard API response format
+// 标准 API 响应格式
 {
-  "err_code": 0,           // 0 = success, >0 = application error
-  "err_msg": "",           // Human-readable error message
-  "payload": {             // Response data
-    "data": [],            // Main data array/object  
-    "total": 100,          // Total count for pagination
-    "page": 1,             // Current page
-    "page_size": 20        // Items per page
+  "err_code": 0,           // 0 = 成功, >0 = 应用错误
+  "err_msg": "",           // 人类可读的错误消息
+  "payload": {             // 响应数据
+    "data": [],            // 主数据数组/对象
+    "total": 100,          // 分页总数
+    "page": 1,             // 当前页码
+    "page_size": 20        // 每页项目数
   }
 }
 
-// HTTP status code usage:
-// 200: Success (always check err_code for application errors)
-// 400: Bad request / Validation errors
-// 401: Authentication required
-// 403: Permission denied  
-// 404: Resource not found
-// 500: Internal server error
+// HTTP 状态码使用规范:
+// 200: 成功 (总是检查 err_code 获取应用错误)
+// 400: 错误请求 / 验证错误
+// 401: 需要认证
+// 403: 权限拒绝
+// 404: 资源未找到
+// 500: 内部服务器错误
 ```
 
-### Code Organization & Architecture Rules
+### 代码组织架构规则
 
-#### Layer Responsibilities
-- **Models** (`jd/models/`): Database entities, relationships, and basic serialization
-- **Services** (`jd/services/`): Pure business logic, stateless operations (**NO database commits**)
-- **Views** (`jd/views/api/`): API endpoints, request/response handling, authentication
-- **Tasks** (`jd/tasks/`): Celery background processing with database commits
-- **Jobs** (`jd/jobs/`): Standalone scripts for manual/scheduled execution
+#### 分层职责
+- **模型层** (`jd/models/`): 数据库实体、关系定义、基本序列化
+- **服务层** (`jd/services/`): 纯业务逻辑，无状态操作 (**不允许数据库提交**)
+- **视图层** (`jd/views/api/`): API 端点、请求/响应处理、认证检查
+- **任务层** (`jd/tasks/`): Celery 后台处理，包含数据库提交
+- **作业层** (`jd/jobs/`): 独立脚本，用于手动/定时执行
 
-#### Database Transaction Rules
+#### 数据库事务规则
 ```python
-# ✅ ALLOWED - Views, Tasks, Jobs can commit
+# ✅ 允许 - 视图、任务、作业可以提交
 @api_bp.route('/api/users', methods=['POST'])
 def create_user():
     user = User(**data)
     db.session.add(user)
-    db.session.commit()  # OK in views
+    db.session.commit()  # 在视图中允许
 
-# ❌ FORBIDDEN - Services cannot commit
+# ❌ 禁止 - 服务层不能提交
 class UserService:
     def create_user(self, data):
         user = User(**data)
         db.session.add(user)
-        # db.session.commit()  # NOT ALLOWED in services
+        # db.session.commit()  # 服务层中不允许
         return user
 ```
 
-#### Model Conventions
+#### 模型约定
 ```python
-# Use built-in to_dict() for JSON serialization
+# 使用内置 to_dict() 进行 JSON 序列化
 class TgGroup(db.Model):
     def to_dict(self):
         return {
@@ -234,124 +237,143 @@ class TgGroup(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
-# API usage
+# API 使用方式
 return jsonify({
     'err_code': 0,
     'payload': {'data': [group.to_dict() for group in groups]}
 })
 ```
 
-### Testing & Quality Assurance
+### 测试与质量保证
 ```bash
-# Run test suite
+# 运行测试套件
 pytest tests/
 
-# Test specific modules  
+# 测试特定模块
 python jd/tasks/test_base_task.py
 
-# Check code quality (if configured)
+# 代码质量检查（如果配置）
 flake8 jd/
 pylint jd/
+
+# 前端类型检查
+cd frontend && npm run type-check
 ```
 
-## Environment Configuration
+## 环境配置
 
-### Runtime Requirements
-- **Python**: 3.7+ with Conda environment `sdweb`
-- **Node.js**: Latest LTS for frontend development
-- **Database**: MySQL 8.0+ with encrypted connections
-- **Cache/Message Broker**: Redis 6.0+ for Celery and sessions
-- **System**: Linux/macOS recommended for development
+### 运行时需求
+- **Python**: 3.9+ 与 Conda 环境 `sdweb2`
+- **Node.js**: 最新 LTS 版本（前端开发）
+- **数据库**: MySQL 8.0+，支持加密连接
+- **缓存/消息代理**: Redis 6.0+（Celery 和会话存储）
+- **系统**: Linux/macOS（推荐用于开发）
 
-### External Service Dependencies
-- **Telegram API**: 
-  - Requires `api_id` and `api_hash` from https://my.telegram.org
-  - Session files stored locally for persistent connections
-- **Chemical Platform APIs**: Various vendor integrations
-- **Proxy Services**: OxyLabs for web scraping (optional)
-- **Task Scheduling**: Celery Beat for automated operations
+### 外部服务依赖
+- **Telegram API**:
+  - 需要从 https://my.telegram.org 获取 `api_id` 和 `api_hash`
+  - 本地存储会话文件以保持持久连接
+- **化工平台 APIs**: 各种供应商集成
+- **代理服务**: OxyLabs 网络爬取（可选）
+- **任务调度**: Celery Beat 自动化操作
 
-### Configuration Management
+### 配置管理
 ```python
-# config.py structure
+# config.py 结构示例
 class Config:
-    # Database
-    SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://...'
-    
+    # 数据库
+    SQLALCHEMY_DATABASE_URI = 'mysql+mysqldb://user:pass@host:port/db'
+
     # Redis
     REDIS_URL = 'redis://localhost:6379/0'
-    
+
     # Telegram
-    TG_API_ID = 'your_api_id'
-    TG_API_HASH = 'your_api_hash'
-    
+    TG_CONFIG = {
+        "api_id": "your_api_id",
+        "api_hash": "your_api_hash",
+        "sqlite_db_name": "jd_tg.db"
+    }
+
     # Celery
     CELERY_BROKER_URL = REDIS_URL
     CELERY_RESULT_BACKEND = REDIS_URL
 ```
 
-### Development Workflow
-1. **Environment Setup**: Use provided setup scripts for consistent development environment
-2. **Dual Server Development**: Run both frontend (8930) and backend (8981) simultaneously
-3. **Database Migrations**: Manual SQL scripts in `dbrt/` directory
-4. **Task Processing**: Heavy operations handled by background Celery workers
-5. **Legacy Migration**: Gradual replacement of Jinja2 templates with Vue.js components
+### 开发工作流程
+1. **环境设置**: 使用提供的设置脚本确保一致的开发环境
+2. **双服务器开发**: 同时运行前端 (8930) 和后端 (8931) 服务器
+3. **数据库迁移**: 使用 `dbrt/` 目录中的手动 SQL 脚本
+4. **任务处理**: 重型操作由后台 Celery 工作者处理
+5. **现代化迁移**: 逐步将 Jinja2 模板替换为 Vue.js 组件
 
-## Technology Stack
+## 技术栈详情
 
-### Backend Technologies
-- **Web Framework**: Flask 2.2.5 with SQLAlchemy 2.0.31 ORM
-- **Task Queue**: Celery 5.2.7 with Redis 4.5.1 broker
-- **Telegram Client**: Telethon 1.36.0 for API interactions
-- **Web Automation**: Selenium 4.11.2 for dynamic content scraping
-- **Database**: MySQL with PyMySQL connector
-- **Authentication**: Flask-Session with Redis backend
+### 后端技术
+- **Web 框架**: Flask 2.2.5 + SQLAlchemy 2.0.42 ORM
+- **任务队列**: Celery 5.5.3 + Redis 4.5.1 代理
+- **Telegram 客户端**: Telethon 1.40.0，用于 API 交互
+- **Web 自动化**: Selenium 4.34.2，动态内容爬取
+- **数据库**: MySQL + PyMySQL/mysqlclient 连接器
+- **认证**: Flask-JWT-Extended + Flask-Session，Redis 后端
 
-### Frontend Technologies
-- **Framework**: Vue.js 3 with Composition API
-- **Language**: TypeScript for enhanced developer experience
-- **UI Library**: Element Plus for consistent component design
-- **Build Tool**: Vite for fast development and optimized builds
-- **Routing**: Vue Router for SPA navigation
-- **State Management**: Pinia as modern Vuex alternative
-- **HTTP Client**: Axios with request/response interceptors
+### 前端技术
+- **框架**: Vue.js 3.5.21 + Composition API
+- **语言**: TypeScript 5.7.2，增强开发体验
+- **UI 库**: Element Plus 2.11.2，一致的组件设计
+- **构建工具**: Vite 6.0.7，快速开发和优化构建
+- **路由**: Vue Router 4.5.1，SPA 导航
+- **状态管理**: Pinia 2.3.0，现代化 Vuex 替代方案
+- **HTTP 客户端**: Axios 1.7.9，请求/响应拦截器
+- **样式**: UnoCSS 0.65.1 + TailwindCSS 3.4.16 + SCSS
 
-### Operational & Monitoring
-- **Task Scheduling**: Celery Beat with crontab-style scheduling
-- **Logging**: Python logging with configurable levels
-- **Process Management**: Custom shell scripts for service lifecycle
-- **Development Tools**: Hot reload, source maps, TypeScript checking
+### 操作与监控
+- **任务调度**: Celery Beat，crontab 风格调度
+- **日志记录**: Python logging，可配置级别
+- **进程管理**: 自定义 shell 脚本管理服务生命周期
+- **开发工具**: 热重载、源映射、TypeScript 检查
 
-### Scheduled Operations
-- **Daily (00:00)**: Chemical platform data collection and analysis
-- **Every 10 minutes**: Telegram chat history updates and user tracking
-- **Hourly**: File processing, cleanup, and system maintenance
-- **On-demand**: Manual job execution via CLI scripts
+### 定时操作
+- **每日 (00:00)**: 化工平台数据收集与分析
+- **每 10 分钟**: Telegram 聊天历史更新和用户跟踪
+- **每小时**: 文件处理、清理和系统维护
+- **按需**: 通过 CLI 脚本手动执行任务
 
-## Critical Operational Notes
+## 关键操作注意事项
 
-### Database & Transaction Management
-- **Strict Layer Separation**: Only views, tasks, and jobs may commit database transactions
-- **Service Layer Isolation**: Services provide pure business logic without side effects
-- **Model Serialization**: Use built-in `to_dict()` methods for consistent JSON output
+### 数据库与事务管理
+- **严格分层分离**: 只有视图、任务和作业可以提交数据库事务
+- **服务层隔离**: 服务提供纯业务逻辑，无副作用
+- **模型序列化**: 使用内置 `to_dict()` 方法确保一致的 JSON 输出
 
-### Celery & Background Processing  
-- **Queue Isolation**: Separate queues for different operation types to prevent blocking
-- **Worker Configuration**: Different concurrency levels based on operation characteristics
-- **Dependency Resolution**: Some Celery packages may require separate installation steps
+### Celery 与后台处理
+- **队列隔离**: 不同操作类型使用独立队列防止阻塞
+- **工作者配置**: 根据操作特性设置不同并发级别
+- **依赖解析**: 某些 Celery 包可能需要单独安装步骤
 
-### Telegram Integration
-- **Session Management**: Telegram sessions must be initialized before first use
-- **Rate Limiting**: Single worker for Telegram operations to respect API limits
-- **File Handling**: Automatic download and processing of media files
+### Telegram 集成
+- **会话管理**: 首次使用前必须初始化 Telegram 会话
+- **速率限制**: 单一工作者处理 Telegram 操作以遵守 API 限制
+- **文件处理**: 自动下载和处理媒体文件
 
-### Development Environment
-- **Port Management**: Frontend (8930) and backend (8981) run on different ports
-- **Hot Reload**: Both servers support automatic restart on code changes  
-- **Architecture Migration**: System gradually transitioning from SSR to SPA model
+### 开发环境
+- **端口管理**: 前端 (8930) 和后端 (8931) 运行在不同端口
+- **热重载**: 两个服务器都支持代码更改时自动重启
+- **架构迁移**: 系统正在从 SSR 逐步过渡到 SPA 模型
 
-### Security Considerations
-- **API Authentication**: All endpoints protected via custom blueprint authentication
-- **Database Security**: Encrypted connections and parameterized queries
-- **Session Management**: Secure session handling with Redis backend
-- **Configuration**: Sensitive values stored in environment-specific config files
+### 安全考虑
+- **API 认证**: 通过自定义蓝图认证保护所有端点
+- **数据库安全**: 加密连接和参数化查询
+- **会话管理**: 使用 Redis 后端的安全会话处理
+- **配置**: 敏感值存储在环境特定配置文件中
+
+---
+
+## 重要提醒
+
+- **环境**: 项目使用 `sdweb2` conda 环境，不是 `sdweb`
+- **端口**: Flask 服务运行在 8931，前端开发服务器运行在 8930
+- **数据库**: 事务管理严格按分层架构执行
+- **任务队列**: 重型操作和 Telegram 操作使用不同队列
+- **前端构建**: 生产构建输出到 `../static/dist` 目录
+
+遵循本指南确保高效开发和系统稳定性。如有疑问，请参考相关源代码或联系项目维护者。

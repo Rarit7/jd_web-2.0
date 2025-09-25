@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from jd.utils.logging_config import get_logger
 import time
 from functools import wraps
 from typing import Optional
@@ -8,7 +8,7 @@ from jd import db
 from jd.models.job_queue_log import JobQueueLog
 from jd.tasks.base_task import QueueStatus
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.tasks.tg.session_lock', {'component': 'telegram', 'module': 'session_lock'})
 
 
 def with_session_lock(max_retries=5, check_interval=60):

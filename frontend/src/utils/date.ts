@@ -71,24 +71,30 @@ export const formatDateTime = (dateTime: string | Date): string => {
 }
 
 /**
- * Format UTC datetime from database to UTC+8 display
- * @param utcDateTime UTC datetime string from database
- * @returns Formatted date time string in UTC+8
+ * Format datetime from database to local display
+ * 注意：数据库中存储的时间已经是北京时间（UTC+8），不需要时区转换
+ * @param dateTime DateTime string from database (already in Beijing time)
+ * @returns Formatted date time string
  */
-export const formatUTCToLocal = (utcDateTime: string | Date): string => {
-  if (!utcDateTime) return ''
-  
-  // 创建Date对象时，如果字符串不带时区信息，JavaScript会假设它是本地时间
-  // 但数据库存储的是UTC时间，所以需要明确指定为UTC
+export const formatUTCToLocal = (dateTime: string | Date): string => {
+  if (!dateTime) return ''
+
   let date: Date
-  if (typeof utcDateTime === 'string') {
-    // 如果字符串不以Z结尾，添加Z来明确表示这是UTC时间
-    const utcString = utcDateTime.endsWith('Z') ? utcDateTime : utcDateTime + 'Z'
-    date = new Date(utcString)
+  if (typeof dateTime === 'string') {
+    // 后端返回的是ISO格式的时间字符串，但这个时间已经是北京时间
+    // 不添加Z后缀，让JavaScript按本地时间解析
+    date = new Date(dateTime)
   } else {
-    date = utcDateTime
+    date = dateTime
   }
-  
+
+  // 验证日期是否有效
+  if (isNaN(date.getTime())) {
+    console.warn('Invalid date:', dateTime)
+    return String(dateTime)
+  }
+
+  // 直接格式化，不进行时区转换（因为时间已经是北京时间）
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -96,7 +102,6 @@ export const formatUTCToLocal = (utcDateTime: string | Date): string => {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    timeZone: 'Asia/Shanghai',
     hour12: false
   })
 }

@@ -1,6 +1,6 @@
 import asyncio
 import datetime
-import logging
+from jd.utils.logging_config import get_logger
 import os
 import time
 from zoneinfo import ZoneInfo
@@ -18,7 +18,7 @@ from jd.services.spider.telegram_spider import TelegramSpider, TelegramAPIs
 from jd.services.spider.tg import TgService
 from jd.tasks.telegram.session_lock import with_session_lock
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.tasks.tg.tg', {'component': 'telegram', 'module': 'tg_tasks'})
 
 
 

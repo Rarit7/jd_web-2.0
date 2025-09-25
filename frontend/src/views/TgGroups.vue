@@ -52,10 +52,10 @@
             <el-button @click="resetSearch">重置</el-button>
           </el-form-item>
           <el-form-item label="标签筛选">
-            <el-select 
-              v-model="searchForm.tag_ids" 
-              multiple 
-              placeholder="请选择标签" 
+            <el-select
+              v-model="searchForm.tag_ids"
+              multiple
+              placeholder="请选择标签"
               clearable
               style="width: 300px;"
               :max-collapse-tags="2"
@@ -68,13 +68,33 @@
                 :value="tag.id"
               >
                 <div class="tag-option">
-                  <span 
-                    class="tag-color" 
+                  <span
+                    class="tag-color"
                     :style="{ backgroundColor: tag.color }"
                   ></span>
                   <span>{{ tag.name }}</span>
                 </div>
               </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="账号筛选">
+            <el-select
+              v-model="searchForm.account_id"
+              placeholder="请选择Telegram账号"
+              clearable
+              style="width: 300px;"
+              @change="fetchData"
+            >
+              <el-option
+                label="全部"
+                value=""
+              />
+              <el-option
+                v-for="account in tgAccounts"
+                :key="account.id"
+                :label="getAccountDisplayName(account)"
+                :value="account.id"
+              />
             </el-select>
           </el-form-item>
         </el-form>
@@ -355,7 +375,8 @@ const searchForm = reactive({
   group_name: '',
   chat_id: '',
   group_link: '',
-  tag_ids: [] as number[]
+  tag_ids: [] as number[],
+  account_id: ''
 })
 
 // 添加表单
@@ -428,6 +449,9 @@ const fetchData = async () => {
     if (searchForm.tag_ids.length > 0) {
       params.tag_ids = searchForm.tag_ids.join(',')
     }
+    if (searchForm.account_id) {
+      params.account_id = searchForm.account_id
+    }
     
     const response = await tgGroupsApi.getList(params)
     // 后端返回格式为 { err_code: 0, payload: { data: [], tag_list: [] } }
@@ -456,6 +480,7 @@ const resetSearch = () => {
   searchForm.chat_id = ''
   searchForm.group_link = ''
   searchForm.tag_ids = []
+  searchForm.account_id = ''
   fetchData()
 }
 
@@ -590,6 +615,9 @@ const downloadData = async () => {
     }
     if (searchForm.tag_ids.length > 0) {
       params.tag_ids = searchForm.tag_ids.join(',')
+    }
+    if (searchForm.account_id) {
+      params.account_id = searchForm.account_id
     }
     
     const response = await tgGroupsApi.download(params)

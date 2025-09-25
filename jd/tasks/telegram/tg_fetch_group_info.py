@@ -1,4 +1,4 @@
-import logging
+from jd.utils.logging_config import get_logger
 import asyncio
 from typing import Dict, Any, List
 
@@ -10,7 +10,7 @@ from jd.models.tg_account import TgAccount
 from jd.models.tg_group import TgGroup
 from jd.models.tg_group_session import TgGroupSession
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.tasks.tg.tg_fetch_group_info', {'component': 'telegram', 'module': 'fetch_group_info'})
 
 
 class FetchAccountGroupInfoTask(BaseTask):

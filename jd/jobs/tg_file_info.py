@@ -1,4 +1,4 @@
-import logging
+from jd.utils.logging_config import get_logger
 from typing import Optional
 from telethon.tl.types import DocumentAttributeFilename
 
@@ -6,7 +6,7 @@ from jd import db
 from jd.models.tg_document_info import TgDocumentInfo
 from jd.models.tg_group_chat_history import TgGroupChatHistory
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.file_info', {'component': 'telegram', 'module': 'file_info'})
 
 
 class TgFileInfoManager:

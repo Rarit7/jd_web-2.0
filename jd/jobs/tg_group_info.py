@@ -1,4 +1,3 @@
-import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -9,8 +8,12 @@ from jd.models.tg_group_info_change import TgGroupInfoChange
 from jd.models.tg_group_chat_history import TgGroupChatHistory
 from jd.models.tg_group_session import TgGroupSession
 from jd.services.spider.tg import TgService
+from jd.utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.jobs.tg.group_info', {
+    'component': 'telegram',
+    'module': 'group_info'
+})
 
 
 class TgGroupInfoManager:

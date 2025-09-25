@@ -1,0 +1,106 @@
+{
+  "system_thresholds": {
+    "cpu_percent": 80,
+    "memory_percent": 75,
+    "disk_percent": 85,
+    "swap_percent": 70
+  },
+
+  "process_thresholds": {
+    "cpu_percent": 45,
+    "memory_mb": 600,
+    "memory_percent": 15
+  },
+
+  "monitored_processes": {
+    "flask_app": {
+      "patterns": ["python.*web\\.py", "flask.*app"],
+      "max_cpu": 35,
+      "max_memory_mb": 400,
+      "restart_cmd": "cd /home/ec2-user/workspace/jd_web && bash start.sh -w",
+      "critical": true
+    },
+    "vite_frontend": {
+      "patterns": ["node.*vite", "vite.*dev"],
+      "max_cpu": 25,
+      "max_memory_mb": 200,
+      "restart_cmd": "cd /home/ec2-user/workspace/jd_web/frontend && nohup npm run dev > ../log/frontend_out.txt 2>&1 &",
+      "critical": true
+    },
+    "celery_workers": {
+      "patterns": ["celery.*worker"],
+      "max_cpu": 50,
+      "max_memory_mb": 350,
+      "restart_cmd": "cd /home/ec2-user/workspace/jd_web && bash start.sh -c",
+      "critical": true
+    },
+    "vscode_server_core": {
+      "patterns": ["node.*server-main", "node.*vscode.*server", "node.*code-server"],
+      "max_cpu": 60,
+      "max_memory_mb": 500,
+      "restart_cmd": null,
+      "critical": false,
+      "comment": "VSCode核心服务器，允许较高资源使用"
+    },
+    "vscode_core_extensions": {
+      "patterns": ["node.*extensionHost.*python", "node.*pylance", "node.*typescript"],
+      "max_cpu": 40,
+      "max_memory_mb": 400,
+      "restart_cmd": null,
+      "critical": false,
+      "comment": "核心开发插件(Python, TypeScript)，保持运行"
+    },
+    "vscode_heavy_extensions": {
+      "patterns": ["node.*extensionHost(?!.*python)", "node.*extensionHost.*(?!pylance|typescript)"],
+      "max_cpu": 25,
+      "max_memory_mb": 200,
+      "restart_cmd": null,
+      "critical": false,
+      "comment": "非核心插件，限制资源使用"
+    },
+    "vscode_filewatch": {
+      "patterns": ["node.*fileWatcher", "node.*ptyHost"],
+      "max_cpu": 20,
+      "max_memory_mb": 150,
+      "restart_cmd": null,
+      "critical": false,
+      "comment": "文件监控服务，轻量级限制"
+    },
+    "claude_code": {
+      "patterns": ["claude"],
+      "max_cpu": 80,
+      "max_memory_mb": 800,
+      "restart_cmd": null,
+      "critical": true,
+      "comment": "Claude Code - 主要开发工具，高优先级"
+    }
+  },
+
+  "protected_processes": [
+    "sshd", "systemd", "kernel", "init", "kthread",
+    "mariadb", "mysqld", "redis", "system_watchdog",
+    "NetworkManager", "chronyd", "dbus",
+    "node.*server-main", "node.*code-server",
+    "vscode.*server", "claude"
+  ],
+
+  "monitoring": {
+    "check_interval": 45,
+    "grace_period": 90,
+    "max_kills_per_hour": 8,
+    "enable_auto_restart": true,
+    "enable_notifications": true
+  },
+
+  "emergency_thresholds": {
+    "memory_percent": 92,
+    "disk_percent": 95,
+    "load_average": 6.0
+  },
+
+  "logging": {
+    "log_file": "logs/watchdog.log",
+    "max_log_size_mb": 20,
+    "backup_count": 3
+  }
+}

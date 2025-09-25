@@ -1,12 +1,12 @@
 import os
 import asyncio
-import logging
+from jd.utils.logging_config import get_logger
 from jCelery import celery
 from jd import app
 from jd.jobs.tg_file_info import TgFileInfoManager
 from jd.services.spider.tg import TgService
 
-logger = logging.getLogger(__name__)
+logger = get_logger('jd.tasks.tg.tg_download_file', {'component': 'telegram', 'module': 'download_file'})
 
 
 @celery.task(bind=True, name='tg_download_file')

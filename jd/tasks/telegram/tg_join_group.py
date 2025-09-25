@@ -28,7 +28,11 @@ def join_group(group_name, sessionname='', current_user_id=None):
             
             # 获取当前session对应的telegram用户信息
             myself = await tg.get_me()
-            telegram_user_id = str(myself.id) if myself else ''
+            if not myself or not myself.id:
+                logger.error(f'{group_name} 群聊加入失败: 无法获取当前用户信息, session={sessionname}')
+                return f'{group_name} join group fail: Cannot get user info'
+
+            telegram_user_id = str(myself.id)
             
             result = await tg.join_conversation(group_name)
             chat_id = str(result.get('data', {}).get('id', ''))

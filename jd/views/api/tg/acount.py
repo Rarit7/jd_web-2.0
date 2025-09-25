@@ -646,17 +646,34 @@ def tg_account_groups(account_id):
     account = TgAccount.query.filter_by(id=account_id).first()
     if not account:
         raise APIException('账户不存在')
-    
+
+    # 检查账户是否已登录（user_id不为空）
+    if not account.user_id or account.user_id.strip() == '':
+        return success({
+            'groups': [],
+            'total_count': 0,
+            'account_info': {
+                'id': account.id,
+                'name': account.name,
+                'user_id': account.user_id,
+                'nickname': account.nickname
+            },
+            'message': '账户尚未登录，无群组关联信息'
+        })
+
     try:
         from jd.models.tg_group import TgGroup
         from jd.models.tg_group_session import TgGroupSession
 
         # 仅通过tg_group_session表进行关联查询，这是正确的多对多关系
+        # 确保只查询有效的user_id记录
         groups_query = db.session.query(TgGroup, TgGroupSession).join(
             TgGroupSession,
             TgGroup.chat_id == TgGroupSession.chat_id
         ).filter(
-            TgGroupSession.user_id == account.user_id
+            TgGroupSession.user_id == account.user_id,
+            TgGroupSession.user_id.isnot(None),
+            TgGroupSession.user_id != ''
         ).order_by(TgGroup.updated_at.desc())
 
         groups_data = []

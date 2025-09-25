@@ -61,6 +61,19 @@ class FetchAccountGroupInfoTask(BaseTask):
                     'account_id': self.account_id,
                     'stats': {}
                 }
+
+            # 验证user_id不为空（防止数据污染）
+            if not tg_account.user_id or tg_account.user_id.strip() == '':
+                error_msg = f"账户 {tg_account.name} (ID: {self.account_id}) user_id为空，无法处理群组信息"
+                logger.error(error_msg)
+                return {
+                    'err_code': 1,
+                    'err_msg': error_msg,
+                    'success': False,
+                    'message': error_msg,
+                    'account_id': self.account_id,
+                    'stats': {}
+                }
             
             # 调用群组信息同步方法
             # 使用 asyncio.run() 来执行异步方法

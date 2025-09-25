@@ -650,53 +650,31 @@ def tg_account_groups(account_id):
     try:
         from jd.models.tg_group import TgGroup
         from jd.models.tg_group_session import TgGroupSession
-        
-        # 通过tg_group_session表和tg_group表关联查询
+
+        # 仅通过tg_group_session表进行关联查询，这是正确的多对多关系
         groups_query = db.session.query(TgGroup, TgGroupSession).join(
-            TgGroupSession, 
+            TgGroupSession,
             TgGroup.chat_id == TgGroupSession.chat_id
         ).filter(
             TgGroupSession.user_id == account.user_id
         ).order_by(TgGroup.updated_at.desc())
-        
-        # 如果没有通过session表找到，则直接通过account_id查询
-        if groups_query.count() == 0:
-            groups_query = db.session.query(TgGroup).filter(
-                TgGroup.account_id == account.user_id
-            ).order_by(TgGroup.updated_at.desc())
-            
-            groups_data = []
-            for group in groups_query.all():
-                groups_data.append({
-                    'id': group.id,
-                    'name': group.name,
-                    'title': group.title,
-                    'chat_id': group.chat_id,
-                    'status': group.status,
-                    'status_text': get_group_status_text(group.status),
-                    'desc': group.desc,
-                    'group_type': group.group_type,
-                    'group_type_text': '频道' if group.group_type == TgGroup.GroupType.CHANNEL else '群组',
-                    'created_at': group.created_at.strftime('%Y-%m-%d %H:%M:%S') if group.created_at else '',
-                    'updated_at': group.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group.updated_at else ''
-                })
-        else:
-            groups_data = []
-            for group, session in groups_query.all():
-                groups_data.append({
-                    'id': group.id,
-                    'name': group.name,
-                    'title': group.title,
-                    'chat_id': group.chat_id,
-                    'status': group.status,
-                    'status_text': get_group_status_text(group.status),
-                    'desc': group.desc,
-                    'group_type': group.group_type,
-                    'group_type_text': '频道' if group.group_type == TgGroup.GroupType.CHANNEL else '群组',
-                    'session_name': session.session_name,
-                    'created_at': group.created_at.strftime('%Y-%m-%d %H:%M:%S') if group.created_at else '',
-                    'updated_at': group.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group.updated_at else ''
-                })
+
+        groups_data = []
+        for group, session in groups_query.all():
+            groups_data.append({
+                'id': group.id,
+                'name': group.name,
+                'title': group.title,
+                'chat_id': group.chat_id,
+                'status': group.status,
+                'status_text': get_group_status_text(group.status),
+                'desc': group.desc,
+                'group_type': group.group_type,
+                'group_type_text': '频道' if group.group_type == TgGroup.GroupType.CHANNEL else '群组',
+                'session_name': session.session_name,
+                'created_at': group.created_at.strftime('%Y-%m-%d %H:%M:%S') if group.created_at else '',
+                'updated_at': group.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group.updated_at else ''
+            })
         
         return success({
             'groups': groups_data,

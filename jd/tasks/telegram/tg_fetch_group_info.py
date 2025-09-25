@@ -232,6 +232,8 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
         'total_groups': 0,
         'new_sessions': 0,
         'existing_sessions': 0,
+        'updated_empty_sessions': 0,
+        'merged_duplicate_sessions': 0,
         'errors': []
     }
     
@@ -254,19 +256,56 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
         
         for group in groups:
             try:
-                # 检查是否已存在会话记录
+                # 首先检查是否存在空user_id的历史记录
+                empty_user_session = TgGroupSession.query.filter(
+                    db.or_(
+                        TgGroupSession.user_id == '',
+                        TgGroupSession.user_id.is_(None)
+                    ),
+                    TgGroupSession.chat_id == group.chat_id
+                ).first()
+
+                if empty_user_session:
+                    # 在修复前，检查修复后是否会与现有记录重复
+                    potential_duplicate = TgGroupSession.query.filter_by(
+                        user_id=tg_account.user_id,
+                        chat_id=group.chat_id
+                    ).first()
+
+                    if potential_duplicate:
+                        # 如果修复后会重复，删除空记录，保留正常记录
+                        db.session.delete(empty_user_session)
+                        # 更新正常记录的session_name（如果需要）
+                        if potential_duplicate.session_name != tg_account.name:
+                            potential_duplicate.session_name = tg_account.name
+                        db.session.commit()
+
+                        stats['merged_duplicate_sessions'] += 1
+                        logger.info(f"删除空user_id记录并保留正常记录: chat_id={group.chat_id}, user_id={tg_account.user_id}")
+                    else:
+                        # 修复空user_id记录
+                        empty_user_session.user_id = tg_account.user_id
+                        empty_user_session.session_name = tg_account.name
+                        db.session.commit()
+
+                        stats['updated_empty_sessions'] += 1
+                        logger.info(f"修复空user_id记录: chat_id={group.chat_id}, 设置user_id={tg_account.user_id}, session_name={tg_account.name}")
+
+                    continue
+
+                # 检查是否已存在正常的会话记录
                 existing_session = TgGroupSession.query.filter_by(
                     user_id=tg_account.user_id,
                     chat_id=group.chat_id
                 ).first()
-                
+
                 if existing_session:
                     # 更新会话名称（如果不同）
                     if existing_session.session_name != tg_account.name:
                         existing_session.session_name = tg_account.name
                         db.session.commit()
                         logger.debug(f"更新会话名称: chat_id={group.chat_id}, session_name={tg_account.name}")
-                    
+
                     stats['existing_sessions'] += 1
                 else:
                     # 创建新的会话记录
@@ -275,13 +314,13 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
                         chat_id=group.chat_id,
                         session_name=tg_account.name
                     )
-                    
+
                     db.session.add(new_session)
                     db.session.commit()
-                    
+
                     stats['new_sessions'] += 1
                     logger.info(f"创建新会话记录: user_id={tg_account.user_id}, chat_id={group.chat_id}, session_name={tg_account.name}")
-                
+
             except Exception as e:
                 error_msg = f"处理群组会话失败 chat_id={group.chat_id}: {str(e)}"
                 logger.error(error_msg)
@@ -291,7 +330,9 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
         logger.info(f"账户 {tg_account.name} 会话关系同步完成: "
                    f"总计 {stats['total_groups']} 个群组, "
                    f"新增 {stats['new_sessions']} 个会话, "
-                   f"已存在 {stats['existing_sessions']} 个会话")
+                   f"已存在 {stats['existing_sessions']} 个会话, "
+                   f"修复空user_id记录 {stats['updated_empty_sessions']} 个, "
+                   f"合并重复记录 {stats['merged_duplicate_sessions']} 个")
         
     except Exception as e:
         error_msg = f"同步账户 {tg_account.name} 会话关系时发生异常: {str(e)}"

@@ -170,7 +170,12 @@ class TgGroupInfoManager:
         for db_field, data_field, change_type in field_mappings:
             old_value = getattr(existing_group, db_field, '') or ''
             new_value = new_data.get(data_field, '') or ''
-            
+
+            # 特殊处理name字段，避免空字符串导致唯一约束冲突
+            if db_field == 'name' and not new_value.strip():
+                new_value = f"<private_chat>_{chat_id}"
+                logger.debug(f"私人群组name为空，生成name: {new_value}")
+
             if old_value != new_value:
                 # 记录变化
                 TgGroupInfoManager._record_group_info_change(
@@ -179,11 +184,11 @@ class TgGroupInfoManager:
                     old_value=old_value,
                     new_value=new_value
                 )
-                
+
                 # 更新数据库字段
                 setattr(existing_group, db_field, new_value)
                 changes_count += 1
-                
+
                 logger.info(f"群组信息变化 {chat_id}: {db_field} '{old_value}' -> '{new_value}'")
         
         # 更新其他字段（不记录变化）
@@ -213,9 +218,16 @@ class TgGroupInfoManager:
         else:
             group_type = TgGroup.GroupType.GROUP
         
+        # 处理name字段，避免空字符串导致的唯一约束冲突
+        username = group_data.get('username', '') or ''
+        if not username.strip():
+            # 如果username为空，这通常是私人群组，使用特殊标签标识
+            username = f"<private_chat>_{chat_id}"
+            logger.debug(f"私人群组username为空，生成name: {username}")
+
         new_group = TgGroup(
             chat_id=chat_id,
-            name=group_data.get('username', '') or '',
+            name=username,
             desc=group_data.get('channel_description', '') or '',
             title=group_data.get('title', '') or '',
             avatar_path=group_data.get('photo_path', '') or '',

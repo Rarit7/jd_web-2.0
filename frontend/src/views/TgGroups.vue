@@ -19,7 +19,7 @@
               v-model="searchForm.group_name"
               placeholder="请输入群组名称"
               clearable
-              style="width: 200px;"
+              style="width: 250px;"
               @keydown.enter="fetchData"
               @clear="fetchData"
             />
@@ -349,6 +349,9 @@ import { tagsApi, type Tag } from '@/api/tags'
 import { getTgAccountList } from '@/api/tg-accounts'
 import { useRouter } from 'vue-router'
 import { formatUTCToLocal } from '@/utils/date'
+// 导入简繁搜索功能
+import { searchGroupsWithVariants, getSearchStats, shouldUseVariantSearch } from '@/api/enhanced-search'
+import { containsChinese, getSearchSuggestions } from '@/utils/chineseConverter'
 
 // Router实例
 const router = useRouter()
@@ -435,7 +438,7 @@ const getAccountDisplayName = (account: any): string => {
 const fetchData = async () => {
   loading.value = true
   try {
-    // Prepare search parameters
+    // 准备搜索参数
     const params: any = {}
     if (searchForm.group_name) {
       params.group_name = searchForm.group_name
@@ -452,20 +455,36 @@ const fetchData = async () => {
     if (searchForm.account_id) {
       params.account_id = searchForm.account_id
     }
-    
-    const response = await tgGroupsApi.getList(params)
+
+    // 如果是中文搜索，显示特殊提示
+    if (searchForm.group_name && shouldUseVariantSearch(searchForm.group_name)) {
+      ElMessage.info('正在进行简繁体智能搜索...')
+    }
+
+    // 使用增强搜索（支持简繁转换）
+    const response = await searchGroupsWithVariants(params)
+
     // 后端返回格式为 { err_code: 0, payload: { data: [], tag_list: [] } }
-    if (response.data.err_code === 0) {
-      tableData.value = response.data.payload.data
-      tagList.value = response.data.payload.tag_list
-      
-      
+    if (response.err_code === 0) {
+      tableData.value = response.payload.data
+
+      // 显示搜索结果统计（只在有搜索关键词时显示）
+      if (searchForm.group_name) {
+        const statsMessage = getSearchStats(searchForm.group_name, response.payload.data)
+        ElMessage.success(statsMessage)
+      }
+
+      // 如果有标签列表，更新标签数据（兼容原有逻辑）
+      if (response.payload?.tag_list) {
+        tagList.value = response.payload.tag_list
+      }
+
       // 等待DOM更新后检查描述是否溢出
       nextTick(() => {
         checkDescriptionOverflow()
       })
     } else {
-      ElMessage.error(response.data.err_msg || '获取数据失败')
+      ElMessage.error(response.err_msg || '获取数据失败')
     }
   } catch (error) {
     ElMessage.error('获取数据失败')

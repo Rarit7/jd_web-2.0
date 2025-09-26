@@ -10,7 +10,7 @@ class TgGroupChatHistory(BaseModel):
     user_id = db.Column(db.String(128), nullable=False, default='', comment='用户id')
     username = db.Column(db.String(128), nullable=False, default='')
     nickname = db.Column(db.String(128), nullable=False, default='')
-    postal_time = db.Column(db.DateTime, nullable=False, default='1970-10-30 00:00:00')
+    postal_time = db.Column(db.DateTime, nullable=False, default='1970-10-30 00:00:00', comment='消息发布时间，UTC+8北京时间')
     reply_to_msg_id = db.Column(db.String(128), nullable=False, default='', comment='回复的消息id')
     message = db.Column(db.Text, nullable=False, comment='消息')
     photo_path = db.Column(db.String(256), nullable=False, default='', comment='图片路径')

@@ -125,6 +125,14 @@ const routes = computed(() => {
       ]
     },
     {
+      path: '/ad-tracking',
+      name: 'AdTracking',
+      meta: {
+        title: '广告追踪',
+        icon: 'Warning'
+      }
+    },
+    {
       path: '/dashboard-screen',
       name: 'DashboardScreen',
       meta: {

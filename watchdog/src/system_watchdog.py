@@ -19,6 +19,8 @@
 
 import argparse
 import json
+import logging
+import logging.handlers
 import os
 import psutil
 import signal
@@ -31,22 +33,19 @@ from typing import Dict, List, Optional, Tuple
 
 # 添加项目根目录到Python路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+WATCHDOG_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-
-from jd.utils.logging_config import get_logger
 
 
 class SystemWatchdog:
     """系统资源监控和保护"""
 
     def __init__(self, config_file: Optional[str] = None):
-        self.logger = get_logger('system.watchdog', {
-            'component': 'system',
-            'module': 'watchdog'
-        })
-
-        # 默认配置
+        # 先加载配置
         self.config = self._load_config(config_file)
+
+        # 设置独立的日志系统
+        self.logger = self._setup_logger()
 
         # 统计信息
         self.stats = {
@@ -132,7 +131,7 @@ class SystemWatchdog:
 
             # 日志配置
             'logging': {
-                'log_file': 'logs/watchdog.log',
+                'log_file': 'watchdog/logs/watchdog.log',
                 'max_log_size_mb': 50,
                 'backup_count': 3
             }
@@ -148,6 +147,55 @@ class SystemWatchdog:
                 print(f"配置文件加载失败: {e}, 使用默认配置")
 
         return default_config
+
+    def _setup_logger(self) -> logging.Logger:
+        """设置独立的日志系统"""
+        logger = logging.getLogger('watchdog')
+        logger.setLevel(logging.WARNING)
+        logger.propagate = False  # 不传播到父logger
+
+        # 清除已有的handler
+        logger.handlers.clear()
+
+        # 获取日志文件路径
+        log_config = self.config['logging']
+        log_file = log_config['log_file']
+
+        # 如果是相对路径，相对于项目根目录
+        if not os.path.isabs(log_file):
+            log_file = os.path.join(PROJECT_ROOT, log_file)
+
+        # 创建日志目录
+        log_dir = os.path.dirname(log_file)
+        os.makedirs(log_dir, exist_ok=True)
+
+        # 文件handler - 使用RotatingFileHandler
+        max_bytes = log_config['max_log_size_mb'] * 1024 * 1024
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=max_bytes,
+            backupCount=log_config['backup_count'],
+            encoding='utf-8'
+        )
+        file_handler.setLevel(logging.WARNING)
+
+        # 控制台handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.WARNING)
+
+        # 日志格式
+        formatter = logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+
+        # 添加handlers
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+
+        return logger
 
     def _deep_update(self, base_dict: Dict, update_dict: Dict) -> None:
         """深度更新字典"""
@@ -253,21 +301,51 @@ class SystemWatchdog:
             # 如果正则表达式无效，使用简单字符串匹配
             return pattern.lower() in cmdline.lower()
 
-    def is_process_protected(self, proc_info: Dict) -> bool:
-        """检查进程是否受保护"""
+    def is_process_protected(self, proc_info: Dict, system_metrics: Optional[Dict] = None) -> bool:
+        """检查进程是否受保护
+
+        Args:
+            proc_info: 进程信息
+            system_metrics: 系统指标（用于条件保护判断）
+
+        Returns:
+            True 表示进程受保护，不应被杀死
+        """
         name = proc_info.get('name', '').lower()
         cmdline = proc_info.get('cmdline', '').lower()
 
-        # 检查保护列表
+        # 检查绝对保护列表 (永远不杀死)
         for protected in self.config['protected_processes']:
             if protected.lower() in name or protected.lower() in cmdline:
                 return True
 
-        # 保护系统关键进程
+        # 保护系统关键进程 (永远不杀死)
         critical_keywords = ['systemd', 'kernel', 'kthread', 'init', 'sshd']
         for keyword in critical_keywords:
             if keyword in name or keyword in cmdline:
                 return True
+
+        # 检查条件保护列表 (系统负载高时可被杀死)
+        conditionally_protected = self.config.get('conditionally_protected_processes', {})
+        if conditionally_protected and system_metrics:
+            for pattern, thresholds in conditionally_protected.items():
+                if self._match_process_pattern(cmdline, pattern) or self._match_process_pattern(name, pattern):
+                    # 检查系统是否处于紧急状态
+                    memory_ok = system_metrics.get('memory_percent', 0) < thresholds.get('memory_threshold_percent', 100)
+                    load_ok = system_metrics.get('load_average', [0])[0] < thresholds.get('load_average_threshold', 100)
+
+                    if memory_ok and load_ok:
+                        # 系统状态良好，保护该进程
+                        self.logger.info(f"条件保护生效: {name} (PID: {proc_info.get('pid')})")
+                        return True
+                    else:
+                        # 系统处于危险状态，取消保护
+                        self.logger.warning(
+                            f"系统负载过高，取消条件保护: {name} (PID: {proc_info.get('pid')}), "
+                            f"内存: {system_metrics.get('memory_percent', 0):.1f}% (阈值: {thresholds.get('memory_threshold_percent')}%), "
+                            f"负载: {system_metrics.get('load_average', [0])[0]:.2f} (阈值: {thresholds.get('load_average_threshold')})"
+                        )
+                        return False
 
         return False
 
@@ -309,10 +387,18 @@ class SystemWatchdog:
 
         return is_healthy, alerts
 
-    def find_high_usage_processes(self) -> List[Dict]:
-        """查找高资源使用的进程"""
+    def find_high_usage_processes(self, system_metrics: Optional[Dict] = None) -> List[Dict]:
+        """查找高资源使用的进程
+
+        Args:
+            system_metrics: 系统指标，用于条件保护判断
+        """
         high_usage = []
         thresholds = self.config['process_thresholds']
+
+        # 如果没有提供系统指标，获取当前指标
+        if system_metrics is None:
+            system_metrics = self.get_system_metrics()
 
         for proc in psutil.process_iter():
             try:
@@ -320,8 +406,8 @@ class SystemWatchdog:
                 if not proc_info:
                     continue
 
-                # 跳过受保护的进程
-                if self.is_process_protected(proc_info):
+                # 跳过受保护的进程（传入系统指标用于条件保护判断）
+                if self.is_process_protected(proc_info, system_metrics):
                     continue
 
                 # 检查是否超过阈值
@@ -346,14 +432,24 @@ class SystemWatchdog:
         high_usage.sort(key=lambda x: x['cpu_percent'] + x['memory_percent'], reverse=True)
         return high_usage
 
-    def kill_process_safely(self, pid: int, name: str) -> bool:
-        """安全杀死进程"""
+    def kill_process_safely(self, pid: int, name: str, system_metrics: Optional[Dict] = None) -> bool:
+        """安全杀死进程
+
+        Args:
+            pid: 进程ID
+            name: 进程名称
+            system_metrics: 系统指标，用于条件保护判断
+        """
         try:
             proc = psutil.Process(pid)
 
-            # 最后确认不是保护进程
+            # 如果没有提供系统指标，获取当前指标
+            if system_metrics is None:
+                system_metrics = self.get_system_metrics()
+
+            # 最后确认不是保护进程（传入系统指标用于条件保护判断）
             proc_info = self.get_process_info(pid)
-            if proc_info and self.is_process_protected(proc_info):
+            if proc_info and self.is_process_protected(proc_info, system_metrics):
                 self.logger.warning(f"跳过受保护的进程: {name} (PID: {pid})")
                 return False
 
@@ -363,7 +459,7 @@ class SystemWatchdog:
             # 等待进程结束
             try:
                 proc.wait(timeout=10)
-                self.logger.info(f"成功终止进程: {name} (PID: {pid})")
+                self.logger.warning(f"成功终止进程: {name} (PID: {pid})")
                 return True
             except psutil.TimeoutExpired:
                 # 强制杀死
@@ -372,7 +468,7 @@ class SystemWatchdog:
                 return True
 
         except psutil.NoSuchProcess:
-            self.logger.info(f"进程已不存在: {name} (PID: {pid})")
+            self.logger.warning(f"进程已不存在: {name} (PID: {pid})")
             return True
         except Exception as e:
             self.logger.error(f"杀死进程失败: {name} (PID: {pid}), 错误: {e}")
@@ -382,10 +478,10 @@ class SystemWatchdog:
         """重启服务"""
         try:
             if not self.config['monitoring']['enable_auto_restart']:
-                self.logger.info(f"自动重启已禁用，跳过重启服务: {service_name}")
+                self.logger.warning(f"自动重启已禁用，跳过重启服务: {service_name}")
                 return False
 
-            self.logger.info(f"重启服务: {service_name}, 命令: {restart_cmd}")
+            self.logger.warning(f"重启服务: {service_name}, 命令: {restart_cmd}")
 
             # 切换到项目目录
             os.chdir(PROJECT_ROOT)
@@ -400,7 +496,7 @@ class SystemWatchdog:
             )
 
             if result.returncode == 0:
-                self.logger.info(f"服务重启成功: {service_name}")
+                self.logger.warning(f"服务重启成功: {service_name}")
                 self.stats['services_restarted'] += 1
                 return True
             else:
@@ -411,8 +507,12 @@ class SystemWatchdog:
             self.logger.error(f"重启服务异常: {service_name}, 错误: {e}")
             return False
 
-    def handle_high_usage_processes(self) -> int:
-        """处理高资源使用的进程"""
+    def handle_high_usage_processes(self, system_metrics: Optional[Dict] = None) -> int:
+        """处理高资源使用的进程
+
+        Args:
+            system_metrics: 系统指标，用于条件保护判断
+        """
         killed_count = 0
         max_kills = self.config['monitoring']['max_kills_per_hour']
 
@@ -420,7 +520,11 @@ class SystemWatchdog:
             self.logger.warning(f"已达到每小时最大杀死进程数限制: {max_kills}")
             return 0
 
-        high_usage = self.find_high_usage_processes()
+        # 如果没有提供系统指标，获取当前指标
+        if system_metrics is None:
+            system_metrics = self.get_system_metrics()
+
+        high_usage = self.find_high_usage_processes(system_metrics)
 
         for proc_info in high_usage[:5]:  # 最多处理5个进程
             if killed_count >= max_kills:
@@ -432,7 +536,7 @@ class SystemWatchdog:
 
             self.logger.warning(f"发现高资源使用进程: {name} (PID: {pid}), 原因: {reasons}")
 
-            if self.kill_process_safely(pid, name):
+            if self.kill_process_safely(pid, name, system_metrics):
                 killed_count += 1
                 self.stats['processes_killed'] += 1
 
@@ -441,10 +545,18 @@ class SystemWatchdog:
 
         return killed_count
 
-    def check_and_restart_services(self) -> int:
-        """检查并重启关键服务"""
+    def check_and_restart_services(self, system_metrics: Optional[Dict] = None) -> int:
+        """检查并重启关键服务
+
+        Args:
+            system_metrics: 系统指标，用于条件保护判断
+        """
         restarted_count = 0
         monitored = self.find_monitored_processes()
+
+        # 如果没有提供系统指标，获取当前指标
+        if system_metrics is None:
+            system_metrics = self.get_system_metrics()
 
         for service_name, service_config in self.config['monitored_processes'].items():
             if not service_config.get('critical', False):
@@ -470,8 +582,8 @@ class SystemWatchdog:
                     self.logger.warning(f"服务 {service_name} 进程异常: PID {proc_info['pid']}, "
                                       f"CPU: {proc_info['cpu_percent']:.1f}%, 内存: {memory_mb:.1f}MB")
 
-                    # 杀死异常进程
-                    if self.kill_process_safely(proc_info['pid'], proc_info['name']):
+                    # 杀死异常进程（传入系统指标用于条件保护判断）
+                    if self.kill_process_safely(proc_info['pid'], proc_info['name'], system_metrics):
                         # 等待并重启服务
                         time.sleep(5)
                         if service_config.get('restart_cmd'):
@@ -509,6 +621,9 @@ class SystemWatchdog:
         self.stats['checks_performed'] += 1
         self.stats['last_check'] = datetime.now().isoformat()
 
+        # 获取系统指标（用于条件保护判断）
+        system_metrics = self.get_system_metrics()
+
         # 检查系统健康状况
         is_healthy, alerts = self.check_system_health()
 
@@ -517,13 +632,13 @@ class SystemWatchdog:
         if not is_healthy:
             self.logger.warning(f"系统健康检查失败: {'; '.join(alerts)}")
 
-            # 处理高资源使用进程
-            killed = self.handle_high_usage_processes()
+            # 处理高资源使用进程（传入系统指标）
+            killed = self.handle_high_usage_processes(system_metrics)
             if killed > 0:
                 actions_taken.append(f"杀死 {killed} 个高资源使用进程")
 
-            # 检查并重启服务
-            restarted = self.check_and_restart_services()
+            # 检查并重启服务（传入系统指标）
+            restarted = self.check_and_restart_services(system_metrics)
             if restarted > 0:
                 actions_taken.append(f"重启 {restarted} 个服务")
 

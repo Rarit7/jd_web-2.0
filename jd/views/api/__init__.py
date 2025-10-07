@@ -58,7 +58,7 @@ api = ApiBlueprint('api', 'api')
 
 # 导入各个模块以注册路由
 # from . import index  # removed
-from . import user  
+from . import user
 from . import tg
 from . import chemical
 from . import black_keyword
@@ -66,3 +66,4 @@ from . import tag
 from . import change_record
 from . import system
 from . import job_queue
+from . import ad_tracking

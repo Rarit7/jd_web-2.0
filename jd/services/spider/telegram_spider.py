@@ -368,22 +368,22 @@ class TelegramAPIs(object):
     async def join_conversation(self, invite):
         """
         加入Telegram频道或群组
-        
+
         支持两种加入方式：
         1. 公开群组/频道：使用username（如：@channelname）
         2. 私有群组/频道：使用邀请链接的hash部分
-        
+
         Args:
             invite (str): 频道/群组的username或邀请链接hash
-            
+
         Returns:
             dict: 加入结果，格式为：
                 {
                     "data": {"id": chat_id, "group_name": invite},
-                    "result": "Done/Failed", 
+                    "result": "Done/Failed",
                     "reason": "错误原因"
                 }
-        
+
         Note:
             - 无法通过纯数字ID直接加入频道/群组
             - 更换username后，旧username将失效
@@ -926,49 +926,5 @@ class TelegramAPIs(object):
             'photo_path': photo_path
         }
         return out
-
-
-def test_tg_spider():
-    """
-    测试TelegramSpider网页爬虫功能
-    
-    测试多个t.me链接的数据抓取，并根据账户类型进行分类：
-    - 个人账户：account字段包含'@'
-    - 群组账户：account字段包含'subscribers' 
-    - 其他账户：不符合上述条件的账户
-    """
-    spider = TelegramSpider()
-    url_list = ['https://t.me/feixingmeiluo', 'https://t.me/huaxuerou', 'https://t.me/ppo995']
-    for url in url_list:
-        data = spider.search_query(url)
-        if data:
-            if '@' in data['account']:
-                print(f'个人账户：{url}, data:{data}')
-            elif 'subscribers' in data['account']:
-                print(f'群组账户：{url}, data:{data}')
-            else:
-                print(f'其他账户：{url}, data:{data}')
-        else:
-            print(f'{url}, 无数据')
-
-
-if __name__ == '__main__':
-    app.ready(db_switch=False, web_switch=False, worker_switch=False)
-    tg = TelegramAPIs()
-    config_js = app.config['TG_CONFIG']
-    session_name = f'{app.static_folder}/utils/default-telegram.session'
-    api_id = config_js.get("api_id")
-    api_hash = config_js.get("api_hash")
-    proxy = config_js.get("proxy", {})
-    clash_proxy = None
-    # 配置代理
-    # if proxy:
-    #     protocal = proxy.get("protocal", "socks5")
-    #     proxy_ip = proxy.get("ip", "127.0.0.1")
-    #     proxy_port = proxy.get("port", 7890)
-    #     clash_proxy = (protocal, proxy_ip, proxy_port)
-    tg.init_client(
-        session_name=session_name, api_id=api_id, api_hash=api_hash, proxy=clash_proxy
-    )
 
 

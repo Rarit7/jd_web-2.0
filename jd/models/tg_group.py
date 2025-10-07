@@ -28,3 +28,8 @@ class TgGroup(BaseModel):
     class GroupType:
         GROUP = 1
         CHANNEL = 2
+
+    @property
+    def group_intro(self):
+        """Alias for desc field to match AdTrackingJob expectations"""
+        return self.desc

@@ -142,8 +142,12 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
+# MkDocs documentation - ignore all documentation files
+/site/
+.mkdocs-cache/
+mkdocs.yml
+docs/
+deploy-docs.sh
 
 # mypy
 .mypy_cache/
@@ -237,8 +241,7 @@ temp_requirements.txt
 ehthumbs.db
 Thumbs.db
 
-# Documentation directory
-docs/
+# Documentation files - all documentation excluded from version control
 
 # IDE configuration
 .vscode/

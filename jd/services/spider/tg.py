@@ -5,7 +5,7 @@ import requests
 
 from jd import app
 from jd.models.tg_group import TgGroup
-from jd.services.spider.telegram_spider import TelegramAPIs, TelegramSpider
+from jd.services.spider.telegram_spider import TelegramAPIs
 
 logger = logging.getLogger(__name__)
 

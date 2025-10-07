@@ -7,7 +7,7 @@ usage() {
   echo "  -w              启动web"
   echo "  -c              启动Celery 服务"
   echo "  -f              启动前端开发服务器"
-  echo "  -a              执行所有启动（包括前端）"
+  echo "  -a              执行所有启动（不包括前端）"
   echo "  -q              清理搜索队列（标记所有待处理任务为完成）"
   echo "  -h              显示帮助信息"
   echo ""
@@ -37,7 +37,6 @@ while [[ $# -gt 0 ]]; do
     -a)
       web=true
       celery_flag=true
-      frontend=true
       shift
       ;;
     -q)

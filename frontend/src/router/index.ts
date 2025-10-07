@@ -142,9 +142,25 @@ const router = createRouter({
           path: '',
           name: 'ChangeRecord',
           component: () => import('@/views/ChangeRecord.vue'),
-          meta: { 
+          meta: {
             title: '变动分析',
             icon: 'DataAnalysis'
+          }
+        }
+      ]
+    },
+    // 广告追踪
+    {
+      path: '/ad-tracking',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'AdTracking',
+          component: () => import('@/views/ad-tracking/index.vue'),
+          meta: {
+            title: '广告追踪',
+            icon: 'Warning'
           }
         }
       ]

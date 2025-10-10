@@ -166,10 +166,10 @@
                   </div>
                 </div>
                 <div class="group-avatar">
-                  <el-avatar 
-                    :size="64" 
-                    :src="group.photo ? `/static/${group.photo}` : ''" 
-                    :icon="group.group_type === 1 ? 'ChatDotRound' : 'Promotion'"
+                  <el-avatar
+                    :size="64"
+                    :src="group.photo ? `/static/${group.photo}` : ''"
+                    :icon="group.group_type === 1 ? ChatDotRound : Promotion"
                     shape="square"
                   />
                 </div>

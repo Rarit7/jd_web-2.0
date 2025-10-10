@@ -47,14 +47,9 @@ export interface UpdateUserParams {
 export const tgUsersApi = {
   // 获取用户列表
   getList(params: UserListParams = {}) {
-    return request.get('/tg/group_user/list', { 
+    return request.get('/tg/group_user/list', {
       params: { ...params, format: 'json' }
     })
-  },
-
-  // 获取用户详情
-  getDetail(id: number) {
-    return request.get(`/tg/users/${id}`)
   },
 
   // 更新用户信息（备注和标签）

@@ -39,9 +39,12 @@ class Application(Flask):
     def ready(self, db_switch=True, web_switch=True, worker_switch=True, socketio_switch=False):
         # 首先初始化日志系统
         self.setup_logging()
-        
+
         if db_switch:
-            db.init_app(self)
+            # 防止重复初始化 SQLAlchemy
+            if not hasattr(self, '_db_initialized'):
+                db.init_app(self)
+                self._db_initialized = True
         if web_switch:
             self.prepare_blueprints()
         if worker_switch:

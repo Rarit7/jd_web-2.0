@@ -590,18 +590,25 @@ const fetchChatList = async () => {
 
       // 不再获取私人聊天列表，只显示群组聊天
       chatList.value = groupChats
-      
+
       // 检查路由参数中是否指定了要查看的群组
       const groupIdFromRoute = route.query.group_id as string
+      const autoScrollParam = route.query.auto_scroll as string
+
       if (groupIdFromRoute && chatList.value.length > 0) {
         // 根据chat_id查找对应的群组
         const targetGroup = chatList.value.find(chat => chat.chat_id === groupIdFromRoute)
         if (targetGroup) {
-          selectChat(targetGroup.id)
+          // 如果有auto_scroll参数,说明是从其他页面跳转过来定位消息的,不调用selectChat
+          // selectChat会自动跳转到最后一页,这会覆盖URL参数中指定的页码
+          // handleUrlParameters()函数会处理这种情况
+          if (autoScrollParam !== 'true') {
+            selectChat(targetGroup.id)
+          }
           return
         }
       }
-      
+
       // 默认选择第一个聊天
       if (chatList.value.length > 0 && !selectedChatId.value) {
         selectChat(chatList.value[0].id)
@@ -1875,11 +1882,14 @@ const handleUrlParameters = () => {
   const urlGroupId = route.query.group_id as string
   const urlUserId = route.query.user_id as string
   const urlSearchType = route.query.search_type as string
-  
+  const urlPage = route.query.page as string
+  const urlMessageId = route.query.message_id as string
+  const urlAutoScroll = route.query.auto_scroll as string
+
   if (urlGroupId && urlUserId && urlSearchType === 'user_id') {
     // 设置用户ID搜索
     userIdSearchText.value = urlUserId
-    
+
     // 等待群组列表加载完成后选择对应的群组
     const checkAndSelectGroup = () => {
       if (chatList.value.length > 0) {
@@ -1889,7 +1899,7 @@ const handleUrlParameters = () => {
           selectedChatId.value = targetGroup.id
           messageList.value = []
           currentPage.value = 1
-          
+
           // 直接执行用户ID搜索
           fetchMessages(targetGroup.chat_id)
         } else {
@@ -1901,8 +1911,50 @@ const handleUrlParameters = () => {
         setTimeout(checkAndSelectGroup, 100)
       }
     }
-    
+
     checkAndSelectGroup()
+  } else if (urlGroupId && urlPage && urlMessageId && urlAutoScroll === 'true') {
+    // 处理跨页面跳转并定位到特定消息（从AutoTaggingLogs等页面跳转过来）
+    const checkAndJumpToMessage = async () => {
+      if (chatList.value.length > 0) {
+        const targetGroup = chatList.value.find(chat => chat.chat_id === urlGroupId)
+        if (targetGroup) {
+          // 直接设置选中状态,不调用selectChat以避免自动跳转到最后一页
+          selectedChatId.value = targetGroup.id
+          messageList.value = []
+
+          // 设置目标页码
+          const targetPage = parseInt(urlPage)
+          currentPage.value = targetPage
+
+          // 获取该页的消息
+          await fetchMessages(targetGroup.chat_id)
+
+          // 等待DOM更新后滚动到目标消息
+          await nextTick()
+
+          const messageId = parseInt(urlMessageId)
+          const success = await scrollToMessage(messageId)
+
+          if (!success) {
+            // 如果第一次没成功，再试一次
+            setTimeout(async () => {
+              await scrollToMessage(messageId)
+            }, 500)
+          }
+
+          // 清除URL参数,防止页面刷新时重复执行
+          window.history.replaceState({}, '', '/chat-history')
+        } else {
+          console.warn(`未找到群组 ID: ${urlGroupId}`)
+        }
+      } else {
+        // 如果群组列表还没加载完，等待100ms再试
+        setTimeout(checkAndJumpToMessage, 100)
+      }
+    }
+
+    checkAndJumpToMessage()
   }
 }
 

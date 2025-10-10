@@ -1,20 +1,6 @@
 <template>
   <div class="auto-tagging-control">
     <el-card>
-      <template #header>
-        <div class="control-header">
-          <span>自动标签控制面板</span>
-          <el-button
-            type="primary"
-            :icon="Refresh"
-            @click="fetchStats"
-            size="small"
-          >
-            刷新统计
-          </el-button>
-        </div>
-      </template>
-
       <div class="control-content">
         <!-- 统计概览 -->
         <div class="stats-overview">
@@ -66,62 +52,15 @@
           </el-row>
         </div>
 
-        <!-- 快速操作 -->
-        <div class="quick-actions">
-          <el-row :gutter="16">
-            <el-col :span="8">
-              <div class="action-card">
-                <h4>日常任务</h4>
-                <p>处理昨天的聊天记录和用户信息变更</p>
-                <el-button
-                  type="primary"
-                  @click="executeTask('daily')"
-                  :loading="dailyLoading"
-                  style="width: 100%"
-                >
-                  执行日常任务
-                </el-button>
-              </div>
-            </el-col>
-            <el-col :span="8">
-              <div class="action-card">
-                <h4>历史数据处理</h4>
-                <p>对所有历史数据进行关键词匹配</p>
-                <el-button
-                  type="warning"
-                  @click="executeTask('historical')"
-                  :loading="historicalLoading"
-                  style="width: 100%"
-                >
-                  处理历史数据
-                </el-button>
-              </div>
-            </el-col>
-            <el-col :span="8">
-              <div class="action-card">
-                <h4>查看日志</h4>
-                <p>查看自动标签执行日志和统计</p>
-                <el-button
-                  type="info"
-                  @click="showLogsDialog = true"
-                  style="width: 100%"
-                >
-                  查看日志
-                </el-button>
-              </div>
-            </el-col>
-          </el-row>
-        </div>
-
         <!-- 运行中的任务 -->
         <div v-if="runningTasks.length > 0" class="running-tasks">
           <h4>运行中的任务</h4>
           <el-table :data="runningTasks" size="small">
             <el-table-column prop="task_id" label="任务ID" width="200" />
-            <el-table-column prop="type" label="类型" width="100">
+            <el-table-column prop="type" label="类型" width="150">
               <template #default="{ row }">
                 <el-tag :type="row.type === 'daily' ? 'success' : 'warning'">
-                  {{ row.type === 'daily' ? '日常' : '历史' }}
+                  {{ row.type === 'daily' ? '当日数据' : '全部历史' }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -191,10 +130,6 @@
       </div>
     </el-card>
 
-    <!-- 日志对话框 -->
-    <el-dialog v-model="showLogsDialog" title="自动标签日志" width="80%" top="5vh">
-      <AutoTaggingLogs />
-    </el-dialog>
   </div>
 </template>
 
@@ -202,14 +137,12 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  Refresh,
   Document,
   User,
   Files,
   Loading
 } from '@element-plus/icons-vue'
 import { tagsApi, type AutoTagStats } from '@/api/tags'
-import AutoTaggingLogs from '@/views/components/AutoTaggingLogs.vue'
 
 interface Emits {
   (e: 'task-executed'): void
@@ -220,7 +153,6 @@ const emit = defineEmits<Emits>()
 // 响应式数据
 const dailyLoading = ref(false)
 const historicalLoading = ref(false)
-const showLogsDialog = ref(false)
 const runningTasks = ref<any[]>([])
 
 // 统计数据
@@ -258,7 +190,7 @@ const executeTask = async (type: 'daily' | 'historical') => {
   try {
     const response = await tagsApi.executeAutoTagging({ type })
     if (response.err_code === 0) {
-      ElMessage.success(`${type === 'daily' ? '日常' : '历史数据处理'}任务已提交`)
+      ElMessage.success(`${type === 'daily' ? '处理当日数据' : '处理全部历史数据'}任务已提交`)
 
       // 添加到运行任务列表
       const newTask = {
@@ -394,12 +326,6 @@ onMounted(() => {
   width: 100%;
 }
 
-.control-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .control-content {
   display: flex;
   flex-direction: column;
@@ -419,38 +345,6 @@ onMounted(() => {
 
 .stats-overview :deep(.el-statistic__content) {
   color: white;
-}
-
-.quick-actions {
-  margin-top: 20px;
-}
-
-.action-card {
-  padding: 20px;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  text-align: center;
-  height: 140px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.action-card h4 {
-  margin: 0 0 8px 0;
-  color: #303133;
-  font-size: 16px;
-}
-
-.action-card p {
-  margin: 0 0 16px 0;
-  color: #606266;
-  font-size: 13px;
-  line-height: 1.4;
-  flex-grow: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .running-tasks {

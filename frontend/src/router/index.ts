@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/store/modules/user'
 import AppLayout from '@/components/layouts/AppLayout.vue'
+import { authApi } from '@/api/auth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -145,6 +146,38 @@ const router = createRouter({
           meta: {
             title: '变动分析',
             icon: 'DataAnalysis'
+          }
+        }
+      ]
+    },
+    // 人员档案
+    {
+      path: '/user-profile',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'UserProfile',
+          component: () => import('@/views/UserProfile.vue'),
+          meta: {
+            title: '人员档案',
+            icon: 'UserFilled'
+          }
+        }
+      ]
+    },
+    // 关联图谱
+    {
+      path: '/relation-graph',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'RelationGraph',
+          component: () => import('@/views/RelationGraph.vue'),
+          meta: {
+            title: '关联图谱',
+            icon: 'Share'
           }
         }
       ]
@@ -321,7 +354,6 @@ router.beforeEach(async (to, _from, next) => {
     // 如果localStorage中也没有用户信息，尝试通过API获取
     if (!userStore.userInfo) {
       try {
-        const { authApi } = await import('@/api/auth')
         const response = await authApi.getUserInfo()
         if (response.data.err_code === 0) {
           userStore.setUser(response.data.payload)

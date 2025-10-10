@@ -29,6 +29,15 @@ request.interceptors.response.use(
     // 处理HTTP错误
     if (error.response) {
       const status = error.response.status
+      const data = error.response.data
+
+      // 如果后端返回了标准格式的错误信息,使用后端的错误消息
+      if (data && data.err_msg) {
+        ElMessage.error(data.err_msg)
+        return Promise.reject(error)
+      }
+
+      // 否则使用默认的错误消息
       switch (status) {
         case 401:
           ElMessage.error('未授权，请重新登录')
@@ -54,7 +63,7 @@ request.interceptors.response.use(
     } else {
       ElMessage.error('网络连接失败')
     }
-    
+
     return Promise.reject(error)
   }
 )

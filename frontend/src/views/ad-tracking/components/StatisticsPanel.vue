@@ -131,10 +131,10 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import { Document, PieChart as PieChartIcon, User, ChatDotRound, Shop } from '@element-plus/icons-vue'
 import type { StatsResponse } from '@/types/adTracking'
-import type { ECharts } from 'echarts'
+import type { ECharts } from 'echarts/core'
 
 // Chart 实例
 let contentTypeChart: ECharts | null = null

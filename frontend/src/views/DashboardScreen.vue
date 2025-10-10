@@ -87,7 +87,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import 'echarts-wordcloud'
 import { useAppStore } from '@/store/modules/app'
 import { toUTC8 } from '@/utils/date'

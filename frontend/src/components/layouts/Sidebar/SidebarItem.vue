@@ -3,8 +3,8 @@
     <template v-if="hasOneShowingChild(item.children, item) && (!onlyOneChild.children || onlyOneChild.noShowingChildren) && !item.alwaysShow">
       <app-link v-if="onlyOneChild.meta" :to="resolvePath(onlyOneChild.path, onlyOneChild.query)">
         <el-menu-item :index="resolvePath(onlyOneChild.path)" :class="{ 'submenu-title-noDropdown': !isNest }">
-          <el-icon v-if="onlyOneChild.meta.icon">
-            <component :is="onlyOneChild.meta.icon" />
+          <el-icon v-if="onlyOneChild.meta.icon && getIcon(onlyOneChild.meta.icon)">
+            <component :is="getIcon(onlyOneChild.meta.icon)" />
           </el-icon>
           <template #title>
             <span>{{ onlyOneChild.meta.title }}</span>
@@ -15,8 +15,8 @@
 
     <el-sub-menu v-else :index="resolvePath(item.path)" popper-append-to-body>
       <template #title>
-        <el-icon v-if="item.meta?.icon">
-          <component :is="item.meta.icon" />
+        <el-icon v-if="item.meta?.icon && getIcon(item.meta.icon)">
+          <component :is="getIcon(item.meta.icon)" />
         </el-icon>
         <span>{{ item.meta?.title }}</span>
       </template>
@@ -36,6 +36,7 @@
 import { ref, computed } from 'vue'
 import AppLink from './Link.vue'
 import { isExternal } from '@/utils/validate'
+import { getIcon } from '@/utils/icons'
 
 interface RouteItem {
   path: string

@@ -125,12 +125,47 @@ const routes = computed(() => {
       ]
     },
     {
-      path: '/ad-tracking',
-      name: 'AdTracking',
+      path: '/analysis',
+      name: 'Analysis',
       meta: {
-        title: '广告追踪',
-        icon: 'Warning'
-      }
+        title: '分析预警',
+        icon: 'Bell'
+      },
+      children: [
+        {
+          path: '/user-profile',
+          name: 'UserProfile',
+          meta: {
+            title: '人员档案',
+            icon: 'UserFilled'
+          }
+        },
+        {
+          path: '/ad-tracking',
+          name: 'AdTracking',
+          meta: {
+            title: '广告追踪',
+            icon: 'Warning'
+          }
+        },
+        {
+          path: '/tag-manage',
+          name: 'TagManage',
+          meta: {
+            title: '标签管理',
+            icon: 'Collection',
+            roles: [1]
+          }
+        },
+        {
+          path: '/relation-graph',
+          name: 'RelationGraph',
+          meta: {
+            title: '关联图谱',
+            icon: 'Share'
+          }
+        }
+      ]
     },
     {
       path: '/dashboard-screen',
@@ -155,15 +190,6 @@ const routes = computed(() => {
           meta: {
             title: '用户管理',
             icon: 'User',
-            roles: [1]
-          }
-        },
-        {
-          path: '/tag-manage',
-          name: 'TagManage',
-          meta: {
-            title: '标签管理',
-            icon: 'Collection',
             roles: [1]
           }
         },

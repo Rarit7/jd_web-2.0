@@ -7,6 +7,8 @@ export interface Tag {
   status: string
   created_at: string
   updated_at: string
+  keywords?: TagKeywordMapping[] // 关联的关键词（用于预览）
+  keywordsTotal?: number // 关键词总数
 }
 
 export interface TagsResponse {
@@ -35,11 +37,30 @@ export interface TagKeywordMapping {
 
 export interface AutoTagLog {
   id: number
-  tg_user_id: number
+  tg_user_id: string
   tag_id: number
   keyword: string
-  source_type: string
+  source_type: 'chat' | 'nickname' | 'desc'
   source_id: string
+  detail_info?: {
+    user_id: string
+    user_nickname: string
+    user_username: string
+    // chat 类型特有字段
+    chat_id?: string
+    chat_title?: string
+    message_id?: string
+    message_text?: string
+    message_date?: string
+    // nickname 类型特有字段
+    old_nickname?: string
+    new_nickname?: string
+    // desc 类型特有字段
+    old_desc?: string
+    new_desc?: string
+    // 通用字段
+    matched_text: string
+  }
   created_at: string
 }
 
@@ -158,7 +179,8 @@ class TagsApi {
     const response = await request.post('/tag/auto-tagging/execute', data, {
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 120000 // 2分钟超时，因为任务可能需要较长时间
     })
     return response.data
   }

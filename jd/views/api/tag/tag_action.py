@@ -1,4 +1,5 @@
 from flask import request, session, jsonify
+import logging
 
 from jd import db
 from jd.helpers.user import current_user_id
@@ -7,6 +8,8 @@ from jd.services.role_service.role import RoleService
 from jd.services.tag import TagService
 from jd.views import get_or_exception
 from jd.views.api import api
+
+logger = logging.getLogger(__name__)
 
 
 @api.route('/tag/list', methods=['GET'])
@@ -135,6 +138,7 @@ def tag_edit():
         # 支持JSON请求和表单请求
         if request.method == 'PUT' or request.headers.get('Content-Type') == 'application/json':
             data = request.get_json()
+            logger.info(f"tag_edit - Received JSON data: {data}")
             if not data:
                 return jsonify({
                     'err_code': 1,
@@ -148,7 +152,9 @@ def tag_edit():
             tag_id = request.form.get('id')
             name = request.form.get('name')
             color = request.form.get('color')
-            
+
+        logger.info(f"tag_edit - Parsed params: id={tag_id}, name={name}, color={color}")
+
         if not tag_id or not name or not name.strip():
             return jsonify({
                 'err_code': 1,

@@ -20,130 +20,122 @@
 
       <!-- 标签页 -->
       <el-tabs v-model="activeTab" class="tag-tabs">
-        <!-- 基础标签管理 -->
+        <!-- 标签管理 -->
         <el-tab-pane label="标签管理" name="basic">
           <div v-loading="loading" class="content">
-            <el-table :data="tableData" style="width: 100%" stripe>
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="name" label="标签名称">
-            <template #default="{ row }">
-              <el-tag :color="row.color" effect="dark" style="color: white; border: none;">
-                {{ row.name }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="color" label="颜色" width="80">
-            <template #default="{ row }">
-              <div 
-                :style="{ 
-                  width: '20px', 
-                  height: '20px', 
-                  backgroundColor: row.color, 
-                  borderRadius: '4px',
-                  border: '1px solid #dcdfe6'
-                }"
-              ></div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.status === '有效' ? 'success' : 'danger'">
-                {{ row.status }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="180" />
-          <el-table-column prop="updated_at" label="更新时间" width="180" />
-          <el-table-column label="操作" width="280" fixed="right">
-            <template #default="{ row }">
-              <el-button
-                type="info"
-                size="small"
-                @click="viewKeywords(row)"
-              >
-                关键词
-              </el-button>
-              <el-button
-                type="primary"
-                size="small"
-                @click="editTag(row)"
-              >
-                编辑
-              </el-button>
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteTag(row)"
-              >
-                删除
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+            <el-table
+              :data="tableData"
+              style="width: 100%"
+              stripe
+              @row-click="handleRowClick"
+              :row-class-name="() => 'clickable-row'"
+            >
+              <!-- 标签名称（带颜色） -->
+              <el-table-column prop="name" label="标签" width="200">
+                <template #default="{ row }">
+                  <el-tag
+                    :color="row.color"
+                    effect="dark"
+                    size="large"
+                    style="color: white; border: none; font-size: 14px; padding: 8px 16px;"
+                  >
+                    {{ row.name }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+
+              <!-- 绑定关键词 -->
+              <el-table-column label="绑定关键词">
+                <template #default="{ row }">
+                  <div class="keywords-preview">
+                    <template v-if="row.keywordsTotal > 0">
+                      <span
+                        v-for="(kw, idx) in row.keywords"
+                        :key="idx"
+                        class="keyword-chip"
+                      >
+                        {{ kw.keyword }}
+                      </span>
+                      <span v-if="row.keywordsTotal > row.keywords.length" class="more-count">
+                        (+{{ row.keywordsTotal - row.keywords.length }})
+                      </span>
+                    </template>
+                    <el-tag v-else type="info" size="small" effect="plain">
+                      暂无关键词
+                    </el-tag>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <!-- 操作 -->
+              <el-table-column label="操作" width="200" align="center">
+                <template #default="{ row }">
+                  <div class="action-buttons">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :icon="Plus"
+                      @click.stop="openBatchImport(row)"
+                    >
+                      添加关键词
+                    </el-button>
+                    <el-button
+                      type="warning"
+                      size="small"
+                      :icon="Edit"
+                      @click.stop="editTag(row)"
+                    >
+                      修改标签
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 展开的关键词详情面板 -->
+            <el-collapse-transition>
+              <div v-if="expandedTagId" class="keyword-detail-panel">
+                <div class="panel-header">
+                  <h3>
+                    <span>关键词管理 - </span>
+                    <el-tag
+                      :color="expandedTag?.color"
+                      effect="dark"
+                      size="large"
+                      style="color: white; border: none;"
+                    >
+                      {{ expandedTag?.name }}
+                    </el-tag>
+                  </h3>
+                  <div class="panel-actions">
+                    <el-button
+                      size="small"
+                      :icon="Close"
+                      @click="expandedTagId = null"
+                    >
+                      收起
+                    </el-button>
+                  </div>
+                </div>
+                <KeywordList
+                  :tag-id="expandedTagId"
+                  :key="expandedTagId"
+                  @refresh="fetchData"
+                />
+              </div>
+            </el-collapse-transition>
           </div>
         </el-tab-pane>
 
-        <!-- 自动标签 -->
-        <el-tab-pane label="自动标签" name="auto-tagging">
-          <div class="auto-tagging-section">
-            <!-- 标签选择器 -->
-            <div class="tag-selector">
-              <el-select
-                v-model="selectedTagId"
-                placeholder="选择标签查看关键词"
-                style="width: 300px"
-                @change="handleTagChange"
-                clearable
-              >
-                <el-option
-                  v-for="tag in tableData"
-                  :key="tag.id"
-                  :label="tag.name"
-                  :value="tag.id"
-                >
-                  <div style="display: flex; align-items: center;">
-                    <el-tag :color="tag.color" effect="dark" size="small" style="margin-right: 8px; color: white; border: none;">
-                      {{ tag.name }}
-                    </el-tag>
-                  </div>
-                </el-option>
-              </el-select>
-            </div>
+        <!-- 自动标签统计 -->
+        <el-tab-pane label="自动标签统计" name="auto-tagging">
+          <div class="stats-section">
+            <!-- 统计概览 -->
+            <AutoTaggingControl @task-executed="handleTaskExecuted" />
 
-            <!-- 关键词列表 -->
-            <div v-if="selectedTagId" class="keywords-section">
-              <div class="section-header">
-                <h3>关键词列表</h3>
-                <div class="section-actions">
-                  <el-button
-                    type="primary"
-                    size="small"
-                    :icon="Plus"
-                    @click="showKeywordDialog = true"
-                  >
-                    添加关键词
-                  </el-button>
-                  <el-button
-                    type="warning"
-                    size="small"
-                    :icon="DocumentAdd"
-                    @click="showBatchDialog = true"
-                  >
-                    批量导入
-                  </el-button>
-                </div>
-              </div>
-
-              <KeywordList
-                :tag-id="selectedTagId"
-                :key="selectedTagId"
-                @refresh="fetchData"
-              />
-            </div>
-
-            <!-- 控制面板 -->
-            <div class="control-panel">
-              <AutoTaggingControl @task-executed="handleTaskExecuted" />
+            <!-- 自动标签日志 -->
+            <div class="logs-section">
+              <AutoTaggingLogs @view-detail="handleViewLogDetail" />
             </div>
           </div>
         </el-tab-pane>
@@ -251,17 +243,17 @@
       <el-form :model="executeForm" label-width="120px">
         <el-form-item label="任务类型">
           <el-radio-group v-model="executeForm.type">
-            <el-radio value="daily">日常任务</el-radio>
-            <el-radio value="historical">历史数据处理</el-radio>
+            <el-radio value="daily">处理当日数据</el-radio>
+            <el-radio value="historical">处理全部历史数据</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item>
           <div class="task-description">
             <div v-if="executeForm.type === 'daily'">
-              处理昨天的聊天记录和用户信息变更，为匹配关键词的用户自动添加标签。
+              处理当日0:00到当前时刻的新增数据，为匹配关键词的用户自动添加标签。
             </div>
             <div v-else>
-              对所有历史聊天记录和用户信息进行关键词匹配，可能需要较长时间。
+              对所有历史聊天记录和用户信息进行关键词匹配。可能需要较长时间。
             </div>
           </div>
         </el-form-item>
@@ -277,29 +269,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, CaretRight, DocumentAdd } from '@element-plus/icons-vue'
+import { Plus, CaretRight, DocumentAdd, Close, Edit } from '@element-plus/icons-vue'
 import type { FormInstance } from 'element-plus'
 import { tagsApi, type Tag } from '@/api/tags'
 import KeywordForm from '@/views/components/KeywordForm.vue'
 import KeywordList from '@/views/components/KeywordList.vue'
 import AutoTaggingControl from '@/views/components/AutoTaggingControl.vue'
+import AutoTaggingLogs from '@/views/components/AutoTaggingLogs.vue'
 
 // 响应式数据
 const loading = ref(false)
 const addLoading = ref(false)
 const editLoading = ref(false)
 const batchLoading = ref(false)
-const executeLoading = ref(false)
 const showAddDialog = ref(false)
 const showEditDialog = ref(false)
 const showKeywordDialog = ref(false)
 const showBatchDialog = ref(false)
 const showExecuteDialog = ref(false)
+const executeLoading = ref(false)
 const tableData = ref<Tag[]>([])
 const activeTab = ref('basic')
 const selectedTagId = ref<number>()
+const expandedTagId = ref<number | null>(null)
+const currentBatchTagId = ref<number>()
 
 // 表单引用
 const addFormRef = ref<FormInstance>()
@@ -355,13 +350,38 @@ const executeForm = reactive({
   type: 'daily' as 'daily' | 'historical'
 })
 
-// 获取标签列表
+// 计算属性：当前展开的标签
+const expandedTag = computed(() => {
+  return tableData.value.find(tag => tag.id === expandedTagId.value)
+})
+
+// 获取标签列表（带关键词）
 const fetchData = async () => {
   loading.value = true
   try {
     const response = await tagsApi.getList()
     if (response.err_code === 0) {
-      tableData.value = response.payload.data
+      // 为每个标签加载关键词（只获取前5个用于预览，但要获取总数）
+      const tagsWithKeywords = await Promise.all(
+        response.payload.data.map(async (tag) => {
+          try {
+            const keywordsResp = await tagsApi.getKeywordMappings(tag.id, {
+              page: 1,
+              page_size: 5,  // 只获取前5个用于预览
+              is_active: true
+            })
+            return {
+              ...tag,
+              keywords: keywordsResp.err_code === 0 ? keywordsResp.payload.data : [],
+              keywordsTotal: keywordsResp.err_code === 0 ? keywordsResp.payload.total : 0  // 保存总数
+            }
+          } catch (error) {
+            console.error(`获取标签 ${tag.id} 关键词失败:`, error)
+            return { ...tag, keywords: [], keywordsTotal: 0 }
+          }
+        })
+      )
+      tableData.value = tagsWithKeywords
     } else {
       ElMessage.error(response.err_msg || '获取标签列表失败')
     }
@@ -371,6 +391,30 @@ const fetchData = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 点击表格行
+const handleRowClick = (row: Tag) => {
+  // 切换展开/收起
+  if (expandedTagId.value === row.id) {
+    expandedTagId.value = null
+  } else {
+    expandedTagId.value = row.id
+    selectedTagId.value = row.id
+  }
+}
+
+// 打开批量导入对话框
+const openBatchImport = (row: Tag) => {
+  currentBatchTagId.value = row.id
+  selectedTagId.value = row.id
+  showBatchDialog.value = true
+}
+
+// 查看日志详情
+const handleViewLogDetail = (log: any) => {
+  // TODO: 实现日志详情抽屉
+  console.log('View log detail:', log)
 }
 
 // 添加标签
@@ -430,7 +474,7 @@ const updateTag = async () => {
     }
   } catch (error) {
     console.error('更新标签失败:', error)
-    ElMessage.error('更新失败')
+    // 错误消息已经在axios拦截器中显示,这里不需要再显示
   } finally {
     editLoading.value = false
   }
@@ -483,7 +527,9 @@ const handleKeywordSuccess = () => {
 
 // 批量导入处理
 const handleBatchImport = async () => {
-  if (!selectedTagId.value) {
+  const tagId = currentBatchTagId.value || selectedTagId.value
+
+  if (!tagId) {
     ElMessage.warning('请先选择标签')
     return
   }
@@ -506,7 +552,7 @@ const handleBatchImport = async () => {
     }
 
     const response = await tagsApi.batchCreateKeywords({
-      tag_id: selectedTagId.value,
+      tag_id: tagId,
       keywords: keywords,
       auto_focus: batchForm.autoFocus
     })
@@ -517,6 +563,18 @@ const handleBatchImport = async () => {
       showBatchDialog.value = false
       batchForm.keywords = ''
       batchForm.autoFocus = false
+
+      // 刷新标签列表数据
+      await fetchData()
+
+      // 如果当前有展开的关键词面板，刷新该面板
+      // 通过改变 key 来强制 KeywordList 组件重新加载
+      if (expandedTagId.value === tagId) {
+        const currentId = expandedTagId.value
+        expandedTagId.value = null
+        await nextTick()
+        expandedTagId.value = currentId
+      }
     } else {
       ElMessage.error(response.err_msg || '批量导入失败')
     }
@@ -528,23 +586,28 @@ const handleBatchImport = async () => {
   }
 }
 
-// 执行任务处理
+// 执行自动标签任务
 const handleExecuteTask = async () => {
   executeLoading.value = true
   try {
-    const response = await tagsApi.executeAutoTagging({
-      type: executeForm.type
-    })
-
+    const response = await tagsApi.executeAutoTagging({ type: executeForm.type })
     if (response.err_code === 0) {
-      ElMessage.success(`任务已提交，任务ID: ${response.payload.task_id}`)
+      const payload = response.payload
+      if (payload.status === 'WAITING') {
+        ElMessage.info(`任务已加入等待队列，队列位置：${payload.queue_position || 1}`)
+      } else if (payload.status === 'SUCCESS') {
+        ElMessage.success('任务执行成功')
+      } else {
+        ElMessage.success('任务已提交')
+      }
       showExecuteDialog.value = false
+      fetchData() // 刷新标签列表
     } else {
       ElMessage.error(response.err_msg || '任务提交失败')
     }
   } catch (error) {
     console.error('任务执行失败:', error)
-    ElMessage.error('任务执行失败')
+    // 错误消息已经在axios拦截器中显示
   } finally {
     executeLoading.value = false
   }
@@ -552,7 +615,8 @@ const handleExecuteTask = async () => {
 
 // 任务执行处理
 const handleTaskExecuted = () => {
-  ElMessage.success('任务执行成功')
+  ElMessage.success('任务已提交')
+  fetchData() // 刷新标签列表
 }
 
 // 页面加载时获取数据
@@ -579,6 +643,90 @@ onMounted(() => {
 
 .content {
   min-height: 400px;
+}
+
+/* 可点击的表格行 */
+:deep(.clickable-row) {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+:deep(.clickable-row:hover) {
+  background-color: #f5f7fa !important;
+}
+
+/* 操作按钮 */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+/* 关键词预览 */
+.keywords-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.keyword-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #ecf5ff;
+  color: #409eff;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.more-count {
+  color: #909399;
+  font-size: 12px;
+}
+
+/* 关键词详情面板 */
+.keyword-detail-panel {
+  margin-top: 20px;
+  padding: 20px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #dcdfe6;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 自动标签统计区域 */
+.stats-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+}
+
+.logs-section {
+  margin-top: 24px;
+  width: 100%;
 }
 
 .color-picker {

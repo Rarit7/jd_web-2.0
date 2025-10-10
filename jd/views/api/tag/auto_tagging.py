@@ -1,12 +1,18 @@
 from flask import request, jsonify
 from sqlalchemy.exc import IntegrityError
+import logging
 
 from jd import db
 from jd.helpers.user import current_user_id
 from jd.models.tag_keyword_mapping import TagKeywordMapping
 from jd.models.auto_tag_log import AutoTagLog
-from jd.services.auto_tagging_service import AutoTaggingService
+from jd.jobs.auto_tagging import AutoTaggingService
 from jd.views.api import api
+
+logger = logging.getLogger(__name__)
+
+# 创建服务单例实例（共享缓存）
+_auto_tagging_service = AutoTaggingService()
 
 
 @api.route('/tag/tag-keywords', methods=['POST'])
@@ -177,53 +183,163 @@ def batch_create_tag_keywords():
 
 @api.route('/tag/auto-tagging/execute', methods=['POST'])
 def trigger_auto_tagging():
-    """手动触发自动标签任务"""
+    """手动触发自动标签任务（异步 Celery 执行）"""
     data = request.get_json() or {}
     task_type = data.get('type', 'daily')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    wait_if_conflict = data.get('wait_if_conflict', True)
 
-    if task_type not in ['daily', 'historical']:
-        return jsonify({'err_code': 1, 'err_msg': '无效的任务类型'})
+    if task_type not in ['daily', 'historical', 'date_range']:
+        return jsonify({'err_code': 1, 'err_msg': '无效的任务类型，支持: daily, historical, date_range'})
 
     try:
-        # Import tasks dynamically to avoid circular import
-        from jd.tasks.auto_tagging_tasks import daily_auto_tagging_task, historical_auto_tagging_task
+        # 使用 Celery 异步执行 BaseTask
+        from jd.tasks.auto_tagging_task import execute_auto_tagging_basetask
 
-        if task_type == 'historical':
-            task = historical_auto_tagging_task.delay()
-        else:
-            task = daily_auto_tagging_task.delay()
+        # 提交到 Celery 队列异步执行
+        celery_task = execute_auto_tagging_basetask.delay(
+            task_type=task_type,
+            start_date=start_date,
+            end_date=end_date,
+            wait_if_conflict=wait_if_conflict
+        )
 
+        logger.info(f"自动标签任务已提交到Celery队列: task_id={celery_task.id}, type={task_type}")
+
+        # 立即返回任务ID
         return jsonify({
             'err_code': 0,
+            'err_msg': '任务已提交',
             'payload': {
-                'task_id': task.id,
-                'task_type': task_type,
-                'status': 'submitted'
+                'task_id': celery_task.id,
+                'status': 'PENDING',
+                'type': task_type,
+                'message': '任务正在后台执行，请使用任务ID查询状态'
             }
         })
+
     except Exception as e:
+        logger.error(f'触发自动标签任务失败: {str(e)}', exc_info=True)
         return jsonify({'err_code': 1, 'err_msg': f'任务提交失败: {str(e)}'})
 
 
 @api.route('/tag/auto-tagging/task-status/<task_id>', methods=['GET'])
 def get_task_status(task_id):
-    """获取自动标签任务状态"""
+    """获取自动标签任务状态（支持 BaseTask 队列）"""
     try:
-        # Import celery dynamically to avoid circular import
-        from scripts.worker import celery
-        task = celery.AsyncResult(task_id)
+        # 判断是否是队列任务（格式：queue_123）
+        if task_id.startswith('queue_'):
+            queue_id = int(task_id.replace('queue_', ''))
+
+            from jd.models.job_queue_log import JobQueueLog
+            from jd.tasks.base_task import QueueStatus
+
+            queue_log = JobQueueLog.query.get(queue_id)
+            if not queue_log:
+                return jsonify({
+                    'err_code': 1,
+                    'err_msg': f'任务队列记录不存在: {queue_id}'
+                })
+
+            # 映射队列状态
+            status_map = {
+                QueueStatus.PENDING.value: 'PENDING',
+                QueueStatus.RUNNING.value: 'RUNNING',
+                QueueStatus.FINISHED.value: 'SUCCESS',
+                QueueStatus.WAITING.value: 'WAITING',
+                QueueStatus.CANCELLED.value: 'CANCELLED',
+                QueueStatus.TIMEOUT.value: 'TIMEOUT'
+            }
+
+            status = status_map.get(queue_log.status, 'UNKNOWN')
+
+            return jsonify({
+                'err_code': 0,
+                'payload': {
+                    'task_id': task_id,
+                    'queue_id': queue_id,
+                    'status': status,
+                    'name': queue_log.name,
+                    'description': queue_log.description,
+                    'result': queue_log.result,
+                    'created_at': queue_log.created_at.isoformat() if queue_log.created_at else None,
+                    'updated_at': queue_log.updated_at.isoformat() if queue_log.updated_at else None,
+                    'timeout_at': queue_log.timeout_at.isoformat() if queue_log.timeout_at else None
+                }
+            })
+        else:
+            # 兼容旧版 Celery 任务查询
+            from scripts.worker import celery
+            task = celery.AsyncResult(task_id)
+
+            return jsonify({
+                'err_code': 0,
+                'payload': {
+                    'task_id': task_id,
+                    'status': task.status,
+                    'result': task.result if task.ready() else None,
+                    'info': task.info
+                }
+            })
+    except Exception as e:
+        logger.error(f'获取任务状态失败: {str(e)}', exc_info=True)
+        return jsonify({'err_code': 1, 'err_msg': f'获取任务状态失败: {str(e)}'})
+
+
+@api.route('/tag/auto-tagging/task-stop/<task_id>', methods=['POST'])
+def stop_auto_tagging_task(task_id):
+    """停止自动标签任务"""
+    try:
+        # 仅支持队列任务停止
+        if not task_id.startswith('queue_'):
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '仅支持停止 BaseTask 队列任务'
+            })
+
+        queue_id = int(task_id.replace('queue_', ''))
+
+        from jd.models.job_queue_log import JobQueueLog
+        from jd.tasks.base_task import QueueStatus
+
+        queue_log = JobQueueLog.query.get(queue_id)
+        if not queue_log:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': f'任务队列记录不存在: {queue_id}'
+            })
+
+        # 只能停止正在运行或等待中的任务
+        if queue_log.status not in [QueueStatus.RUNNING.value, QueueStatus.WAITING.value]:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': f'任务当前状态不支持停止操作: {queue_log.status}'
+            })
+
+        # 更新任务状态为已取消
+        from datetime import datetime
+        queue_log.status = QueueStatus.CANCELLED.value
+        queue_log.result = '任务被手动停止'
+        queue_log.updated_at = datetime.now()
+        db.session.commit()
+
+        logger.info(f'手动停止自动标签任务: queue_id={queue_id}')
 
         return jsonify({
             'err_code': 0,
+            'err_msg': '任务已停止',
             'payload': {
                 'task_id': task_id,
-                'status': task.status,
-                'result': task.result if task.ready() else None,
-                'info': task.info
+                'queue_id': queue_id,
+                'status': 'CANCELLED'
             }
         })
+
     except Exception as e:
-        return jsonify({'err_code': 1, 'err_msg': f'获取任务状态失败: {str(e)}'})
+        logger.error(f'停止任务失败: {str(e)}', exc_info=True)
+        db.session.rollback()
+        return jsonify({'err_code': 1, 'err_msg': f'停止任务失败: {str(e)}'})
 
 
 @api.route('/tag/auto-tagging/logs', methods=['GET'])
@@ -332,8 +448,8 @@ def preview_auto_tagging():
         return jsonify({'err_code': 1, 'err_msg': '文本内容不能为空'})
 
     try:
-        # 模拟处理文本，但不保存到数据库
-        matched_tags = AutoTaggingService.process_text_for_tags(
+        # 使用服务实例（利用缓存）
+        matched_tags = _auto_tagging_service.process_text_for_tags(
             text, 'preview_user', 'preview', 'preview_id'
         )
 

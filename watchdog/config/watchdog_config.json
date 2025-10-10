@@ -1,37 +1,37 @@
 {
   "system_thresholds": {
-    "cpu_percent": 80,
-    "memory_percent": 75,
-    "disk_percent": 85,
-    "swap_percent": 70
+    "cpu_percent": 90,
+    "memory_percent": 85,
+    "disk_percent": 90,
+    "swap_percent": 80
   },
 
   "process_thresholds": {
-    "cpu_percent": 45,
-    "memory_mb": 600,
-    "memory_percent": 15
+    "cpu_percent": 65,
+    "memory_mb": 1000,
+    "memory_percent": 25
   },
 
   "monitored_processes": {
     "flask_app": {
       "patterns": ["python.*web\\.py", "flask.*app"],
-      "max_cpu": 35,
-      "max_memory_mb": 400,
+      "max_cpu": 60,
+      "max_memory_mb": 800,
       "restart_cmd": "cd /home/ec2-user/workspace/jd_web && bash start.sh -w",
       "critical": true
     },
     "vite_frontend": {
       "patterns": ["node.*vite", "vite.*dev"],
-      "max_cpu": 50,
-      "max_memory_mb": 600,
+      "max_cpu": 70,
+      "max_memory_mb": 800,
       "restart_cmd": null,
       "critical": false,
       "comment": "前端开发服务器，不自动重启"
     },
     "celery_workers": {
       "patterns": ["celery.*worker"],
-      "max_cpu": 50,
-      "max_memory_mb": 350,
+      "max_cpu": 70,
+      "max_memory_mb": 800,
       "restart_cmd": null,
       "critical": false,
       "comment": "Celery 任务队列，不自动重启"
@@ -108,9 +108,9 @@
   },
 
   "monitoring": {
-    "check_interval": 45,
-    "grace_period": 90,
-    "max_kills_per_hour": 8,
+    "check_interval": 120,
+    "grace_period": 300,
+    "max_kills_per_hour": 5,
     "enable_auto_restart": true,
     "enable_notifications": true
   },

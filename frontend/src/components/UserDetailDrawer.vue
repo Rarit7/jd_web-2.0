@@ -649,34 +649,43 @@ const loadUserStats = async () => {
 const loadUserTags = async () => {
   const userDetail = currentUserDetail.value
   if (!userDetail) return
-  
+
   try {
-    // 从用户详情获取标签信息
-    if (userDetail.remark && userDetail.id) {
-      // 先获取完整的用户信息，包括标签
-      const response = await tgUsersApi.getList({
-        keyword: '',
-        group_id: '',
-        tag_ids: '',
-        page: 1,
-        page_size: 1
-      })
-      
+    // 使用user_id获取完整的用户信息，包括标签
+    if (userDetail.user_id) {
+      const response = await tgUsersApi.getUserByUserId(userDetail.user_id)
+
       if (response.data.err_code === 0) {
-        // 找到当前用户
-        const currentUser = response.data.payload.data.find((user: any) => user.id === userDetail.id)
-        if (currentUser && currentUser.tag_id_list) {
+        const userData = response.data.payload
+
+        // 如果用户有标签
+        if (userData.tag_id_list) {
           // 获取标签库中的所有标签
           const tagsResponse = await tagsApi.getList()
           if (tagsResponse.err_code === 0) {
-            const tagIds = currentUser.tag_id_list.split(',').map((id: string) => parseInt(id.trim())).filter((id: number) => !isNaN(id))
+            // 解析标签ID列表
+            const tagIds = userData.tag_id_list
+              .split(',')
+              .map((id: string) => parseInt(id.trim()))
+              .filter((id: number) => !isNaN(id))
+
+            // 过滤出用户拥有的标签
             userTags.value = tagsResponse.payload.data.filter(tag => tagIds.includes(tag.id))
+            console.log(`✅ 成功加载用户标签: ${userTags.value.length} 个`)
           }
+        } else {
+          // 用户没有标签
+          userTags.value = []
+          console.log('ℹ️ 用户暂无标签')
         }
+      } else {
+        console.error('获取用户信息失败:', response.data.err_msg)
+        userTags.value = []
       }
     }
   } catch (error) {
     console.error('加载用户标签失败:', error)
+    userTags.value = []
   }
 }
 

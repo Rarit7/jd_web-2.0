@@ -64,13 +64,13 @@ def tg_group_user_list():
         if tag_ids:
             tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip().isdigit()]
             if tag_id_list:
-                # Get user IDs that have any of the selected tags
+                # Get telegram user IDs that have any of the selected tags
                 user_ids_with_tags = db.session.query(TgGroupUserTag.tg_user_id)\
                     .filter(TgGroupUserTag.tag_id.in_(tag_id_list))\
                     .distinct().all()
                 if user_ids_with_tags:
                     user_ids_list = [uid[0] for uid in user_ids_with_tags]
-                    query = query.filter(TgGroupUserInfo.id.in_(user_ids_list))
+                    query = query.filter(TgGroupUserInfo.user_id.in_(user_ids_list))
                     total_records = query.count()
                     group_user_list = query.order_by(TgGroupUserInfo.id.desc()).offset(offset).limit(page_size).all()
                 else:
@@ -101,16 +101,16 @@ def tg_group_user_list():
         tag_list = TagService.list()
         chat_room = TgGroup.query.filter_by(status=TgGroup.StatusType.JOIN_SUCCESS).all()
         chat_room = {r.chat_id: r.name for r in chat_room}
-        group_user_id_list = [group_user.id for group_user in group_user_list]
+        group_user_id_list = [str(group_user.user_id) for group_user in group_user_list]
         parse_tag_list = TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id.in_(group_user_id_list)).all()
         parse_tag_result = collections.defaultdict(list)
         for p in parse_tag_list:
             parse_tag_result[p.tg_user_id].append(str(p.tag_id))
         tag_dict = {t['id']: t['name'] for t in tag_list}
-        
+
         data = []
         for group_user in group_user_list:
-            parse_tag = parse_tag_result.get(group_user.id, [])
+            parse_tag = parse_tag_result.get(str(group_user.user_id), [])
             tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
             
             # 格式化数据以匹配前端TgUser接口
@@ -207,19 +207,28 @@ def tg_group_user_download():
 @api.route('/tg/group_user/tag/update', methods=['POST'])
 def tg_group_user_modify_tag():
     args = request.json
-    tg_user_id = get_or_exception('tg_user_id', args, 'int')
+    tg_user_info_id = get_or_exception('tg_user_id', args, 'int')  # 前端传的是 TgGroupUserInfo.id
     tag_id_list = get_or_exception('tag_id_list', args, 'str', '')
     remark = get_or_exception('remark', args, 'str', '')
+
+    # 根据 TgGroupUserInfo.id 查找对应的 telegram user_id
+    user_info = TgGroupUserInfo.query.filter(TgGroupUserInfo.id == tg_user_info_id).first()
+    if not user_info:
+        return jsonify({'err_code': 1, 'err_msg': '用户不存在'})
+
+    telegram_user_id = str(user_info.user_id)
+
+    # 使用 telegram user_id 更新标签
     if tag_id_list:
         tag_id_list = tag_id_list.split(',')
         tag_id_list = [int(t) for t in tag_id_list]
-    TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id == tg_user_id).delete()
+    TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id == telegram_user_id).delete()
     for tag_id in tag_id_list:
-        obj = TgGroupUserTag(tg_user_id=tg_user_id, tag_id=tag_id)
+        obj = TgGroupUserTag(tg_user_id=telegram_user_id, tag_id=tag_id)
         db.session.add(obj)
-    TgGroupUserInfo.query.filter(TgGroupUserInfo.id == tg_user_id).update({
-        'remark': remark
-    })
+
+    # 更新备注
+    user_info.remark = remark
     db.session.commit()
     return success()
 
@@ -286,8 +295,8 @@ def get_user_by_user_id():
         tag_list = TagService.list()
         chat_room = TgGroup.query.filter_by(status=TgGroup.StatusType.JOIN_SUCCESS).all()
         chat_room = {r.chat_id: r.name for r in chat_room}
-        
-        parse_tag_list = TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id == user_record.id).all()
+
+        parse_tag_list = TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id == str(user_record.user_id)).all()
         tag_ids = [str(p.tag_id) for p in parse_tag_list]
         tag_dict = {t['id']: t['name'] for t in tag_list}
         tag_text = ','.join([tag_dict.get(int(t), '') for t in tag_ids if tag_dict.get(int(t), '')])
@@ -376,13 +385,13 @@ def tg_group_user_key_focus_list():
         if tag_ids:
             tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip().isdigit()]
             if tag_id_list:
-                # Get user IDs that have any of the selected tags
+                # Get telegram user IDs that have any of the selected tags
                 user_ids_with_tags = db.session.query(TgGroupUserTag.tg_user_id)\
                     .filter(TgGroupUserTag.tag_id.in_(tag_id_list))\
                     .distinct().all()
                 if user_ids_with_tags:
                     user_ids_list = [uid[0] for uid in user_ids_with_tags]
-                    query = query.filter(TgGroupUserInfo.id.in_(user_ids_list))
+                    query = query.filter(TgGroupUserInfo.user_id.in_(user_ids_list))
                 else:
                     # No users match the tag filter, return empty result
                     return jsonify({
@@ -422,16 +431,16 @@ def tg_group_user_key_focus_list():
         chat_room = {r.chat_id: r.name for r in chat_room}
         
         # 获取标签信息
-        group_user_id_list = [group_user.id for group_user in group_user_list]
+        group_user_id_list = [str(group_user.user_id) for group_user in group_user_list]
         parse_tag_list = TgGroupUserTag.query.filter(TgGroupUserTag.tg_user_id.in_(group_user_id_list)).all()
         parse_tag_result = collections.defaultdict(list)
         for p in parse_tag_list:
             parse_tag_result[p.tg_user_id].append(str(p.tag_id))
         tag_dict = {t['id']: t['name'] for t in tag_list}
-        
+
         data = []
         for group_user in group_user_list:
-            parse_tag = parse_tag_result.get(group_user.id, [])
+            parse_tag = parse_tag_result.get(str(group_user.user_id), [])
             tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
             
             # 格式化数据以匹配前端TgUser接口

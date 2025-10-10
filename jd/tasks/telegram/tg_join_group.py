@@ -36,6 +36,9 @@ def join_group(group_name, sessionname='', current_user_id=None):
 
             result = await tg.join_conversation(group_name)
 
+            # 调试日志：查看join_conversation的完整返回结果
+            logger.info(f'{group_name} join_conversation返回结果: {result}')
+
             # 获取chat_id（Telethon 返回的正整数格式）
             # Telethon 会自动处理正负格式，统一使用正整数存储
             raw_chat_id = result.get('data', {}).get('id', '')
@@ -48,15 +51,20 @@ def join_group(group_name, sessionname='', current_user_id=None):
             
             if result.get('result', 'Failed') == 'Failed':
                 # 根据错误信息判断失败原因
-                error_message = result.get("message", "Unknown error")
+                error_message = result.get("reason", "Unknown error")
 
                 # 检查是否是无效链接的常见错误信息
                 if any(keyword in error_message.lower() for keyword in [
+                    'expired', 'not valid anymore', '已过期', '不再有效',
                     'not found', 'invalid', 'does not exist', 'username not found',
                     'chat not found', 'peer not found', 'cannot find', '找不到', '无效'
                 ]):
                     status = TgGroup.StatusType.INVALID_LINK
-                    status_desc = 'invalid link'
+                    # 区分过期和其他无效情况
+                    if any(k in error_message.lower() for k in ['expired', '已过期', 'not valid anymore']):
+                        status_desc = 'invite link expired'
+                    else:
+                        status_desc = 'invalid link'
                 else:
                     status = TgGroup.StatusType.JOIN_FAIL
                     status_desc = 'join failed'
@@ -78,33 +86,40 @@ def join_group(group_name, sessionname='', current_user_id=None):
                     db.session.commit()
                     return f'{group_name} invalid link: Invalid chat_id'
 
-                # 尝试获取群组详细信息
-                try:
-                    channel_full = await tg.get_full_channel(chat_id)
-                    logger.info(f'{group_name} 群聊加入成功: {channel_full}')
-                except Exception as get_channel_error:
-                    # get_full_channel失败，说明虽然join_conversation返回了chat_id，但实际无法访问该群组
-                    error_msg = str(get_channel_error)
-                    logger.error(f'{group_name} 获取群组详情失败: {error_msg}, chat_id={chat_id}')
+                # 尝试从join_conversation返回的结果中获取群组详细信息
+                channel_full = result.get('data', {}).get('full_info')
 
-                    # 判断失败类型
-                    if any(keyword in error_msg.lower() for keyword in [
-                        'cannot find', 'not found', 'no such', 'does not exist', '找不到', '不存在'
-                    ]):
-                        status = TgGroup.StatusType.INVALID_LINK
-                        status_desc = 'invalid link'
-                    else:
-                        status = TgGroup.StatusType.JOIN_FAIL
-                        status_desc = 'join failed'
+                # 如果join_conversation已经返回了完整信息，直接使用
+                if channel_full:
+                    logger.info(f'{group_name} 群聊加入成功，已获取完整信息: {channel_full}')
+                    member_count = channel_full.get('member_count', 0)
+                else:
+                    # 如果没有完整信息，尝试单独获取
+                    logger.warning(f'{group_name} join_conversation未返回完整信息，尝试单独获取')
+                    try:
+                        channel_full = await tg.get_full_channel(chat_id)
+                        logger.info(f'{group_name} 群聊加入成功: {channel_full}')
+                        member_count = channel_full.get('member_count', 0)
+                    except Exception as get_channel_error:
+                        # get_full_channel失败，说明虽然join_conversation返回了chat_id，但实际无法访问该群组
+                        error_msg = str(get_channel_error)
+                        logger.error(f'{group_name} 获取群组详情失败: {error_msg}, chat_id={chat_id}')
 
-                    TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update({
-                        'status': status
-                    })
-                    db.session.commit()
-                    return f'{group_name} {status_desc}: {error_msg}'
-                
-                # 获取群人数
-                member_count = channel_full.get('member_count', 0)
+                        # 判断失败类型
+                        if any(keyword in error_msg.lower() for keyword in [
+                            'cannot find', 'not found', 'no such', 'does not exist', '找不到', '不存在'
+                        ]):
+                            status = TgGroup.StatusType.INVALID_LINK
+                            status_desc = 'invalid link'
+                        else:
+                            status = TgGroup.StatusType.JOIN_FAIL
+                            status_desc = 'join failed'
+
+                        TgGroup.query.filter_by(name=group_name, status=TgGroup.StatusType.JOIN_ONGOING).update({
+                            'status': status
+                        })
+                        db.session.commit()
+                        return f'{group_name} {status_desc}: {error_msg}'
 
                 # 将chat_id转换为字符串用于数据库存储（保持正整数格式）
                 chat_id_str = str(chat_id)

@@ -397,29 +397,72 @@ class TelegramAPIs(object):
             "result": result,
             "reason": "",
         }
+        chat = None  # 保存加入成功后的chat对象
         try:
             # Checking a link without joining
             # 检测私有频道或群组时，由于传入的是hash，可能会失败(已测试，除非是被禁止的，否则也会成功)
+            logger.info(f"尝试检查邀请链接: {invite}")
             updates = await self.client(CheckChatInviteRequest(invite))
             if isinstance(updates, ChatInviteAlready):
+                logger.info(f"已经是群组成员: {invite}")
                 chat_id = updates.chat.id
+                chat = updates.chat  # 保存chat对象
                 result = "Done"
             elif isinstance(updates, ChatInvite):
+                logger.info(f"检测到私有群组邀请，尝试加入: {invite}")
                 # Joining a private chat or channel
                 updates = await self.client(ImportChatInviteRequest(invite))
                 chat_id = updates.chats[0].id
+                chat = updates.chats[0]  # 保存chat对象
                 result = "Done"
+                logger.info(f"成功加入私有群组: {invite}, chat_id={chat_id}")
         except Exception as e:
+            logger.warning(f"CheckChatInviteRequest失败: {invite}, 错误: {str(e)}, 尝试直接加入")
             try:
-                # Joining a public chat or channel
+                # Joining a public chat or channel (或者是已经在群组中)
                 updates = await self.client(JoinChannelRequest(invite))
                 result = "Done"
+                chat_id = updates.chats[0].id
+                chat = updates.chats[0]  # 保存chat对象
+                logger.info(f"成功加入群组: {invite}, chat_id={chat_id}")
             except Exception as ee:
+                logger.error(f"JoinChannelRequest也失败: {invite}, 错误: {str(ee)}")
                 result_json["reason"] = str(ee)
                 return result_json
-            chat_id = updates.chats[0].id
+
         result_json["data"]["id"] = chat_id
         result_json["result"] = result
+
+        # 加群成功后，直接获取群组完整信息
+        if result == "Done" and chat:
+            try:
+                avatar_path = os.path.join(app.static_folder, 'images/avatar')
+                self._ensure_directory(avatar_path)
+
+                # 使用刚加入时返回的chat对象获取完整信息
+                if isinstance(chat, Channel):
+                    channel_full = await self.client(GetFullChannelRequest(chat))
+                    member_count = channel_full.full_chat.participants_count
+                    channel_description = channel_full.full_chat.about
+                    username = await self._process_channel_username(chat, channel_full)
+                    megagroup = channel_full.chats[0].megagroup
+                    photo_path = await self._download_avatar(chat, avatar_path)
+
+                    result_json["data"]["full_info"] = {
+                        "id": chat.id,
+                        "title": chat.title,
+                        "username": username,
+                        "megagroup": "channel" if not megagroup else "group",
+                        "member_count": member_count,
+                        "channel_description": channel_description,
+                        "is_public": 1 if username else 0,
+                        "join_date": chat.date.strftime("%Y-%m-%d %H:%M:%S+%Z") if hasattr(chat, 'date') else "",
+                        "photo_path": photo_path
+                    }
+            except Exception as full_info_error:
+                # 获取完整信息失败不影响加群结果，只记录日志
+                logger.warning(f"加群成功但获取完整信息失败: {full_info_error}")
+                result_json["data"]["full_info"] = None
 
         return result_json
 

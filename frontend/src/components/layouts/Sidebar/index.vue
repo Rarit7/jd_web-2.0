@@ -158,6 +158,15 @@ const routes = computed(() => {
           }
         },
         {
+          path: '/auto-tagging',
+          name: 'AutoTagging',
+          meta: {
+            title: '自动标签',
+            icon: 'PriceTag',
+            roles: [1]
+          }
+        },
+        {
           path: '/relation-graph',
           name: 'RelationGraph',
           meta: {

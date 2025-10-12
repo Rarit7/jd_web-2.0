@@ -202,6 +202,8 @@ def extract_group_name_from_url(input_text):
     从Telegram链接中提取群组名称或邀请hash
     支持格式:
     - https://t.me/+invitehash (私有群组邀请链接)
+    - t.me/+invitehash (不带协议的私有邀请链接)
+    - +invitehash (只有邀请hash)
     - https://t.me/joinchat/invitehash (旧格式私有邀请链接)
     - https://t.me/groupname (公开群组链接)
     - t.me/groupname
@@ -224,23 +226,28 @@ def extract_group_name_from_url(input_text):
         if hash_match:
             return hash_match.group(1)  # 返回纯hash,不带+号
 
-    # 2. 处理旧格式私有邀请链接: https://t.me/joinchat/xxx
+    # 2. 处理只有邀请hash的情况: +invitehash
+    if input_text.startswith('+') and len(input_text) > 1:
+        # 移除开头的 + 号，返回纯hash
+        return input_text[1:]
+
+    # 3. 处理旧格式私有邀请链接: https://t.me/joinchat/xxx
     if 't.me/joinchat/' in input_text:
         joinchat_match = re.search(r't\.me/joinchat/([a-zA-Z0-9_-]+)', input_text)
         if joinchat_match:
             return joinchat_match.group(1)
 
-    # 3. 处理公开群组链接: https://t.me/groupname 或 t.me/groupname
+    # 4. 处理公开群组链接: https://t.me/groupname 或 t.me/groupname
     telegram_url_pattern = r'(?:https?://)?t\.me/([a-zA-Z0-9_]+)'
     match = re.match(telegram_url_pattern, input_text)
     if match:
         return match.group(1)
 
-    # 4. 处理 @groupname 格式
+    # 5. 处理 @groupname 格式
     if input_text.startswith('@'):
         return input_text[1:]  # 移除 @ 符号
 
-    # 5. 如果都不匹配，直接返回原文本（假设是群组名称或hash）
+    # 6. 如果都不匹配，直接返回原文本（假设是群组名称或hash）
     return input_text
 
 @api.route('/tg/group/add', methods=['POST'])

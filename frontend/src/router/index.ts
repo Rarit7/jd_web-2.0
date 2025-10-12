@@ -113,7 +113,7 @@ const router = createRouter({
           path: '',
           name: 'ChatHistory',
           component: () => import('@/views/ChatHistory.vue'),
-          meta: { 
+          meta: {
             title: '聊天内容',
             icon: 'ChatLineRound'
           }
@@ -242,6 +242,22 @@ const router = createRouter({
           meta: {
             title: '标签管理',
             icon: 'Collection',
+            roles: [1]
+          }
+        }
+      ]
+    },
+    {
+      path: '/auto-tagging',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'AutoTagging',
+          component: () => import('@/views/AutoTagging.vue'),
+          meta: {
+            title: '自动标签',
+            icon: 'PriceTag',
             roles: [1]
           }
         }

@@ -18,6 +18,8 @@ import {
   Tools,
   Sell,
   Setting,
+  Bell,
+  PriceTag,
 } from '@element-plus/icons-vue'
 
 import type { Component } from 'vue'
@@ -40,6 +42,8 @@ export const iconMap: Record<string, Component> = {
   Tools,
   Sell,
   Setting,
+  Bell,
+  PriceTag,
 }
 
 // 根据图标名称获取图标组件

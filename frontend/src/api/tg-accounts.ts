@@ -181,3 +181,11 @@ export const getAccountGroups = async (accountId: number): Promise<ApiResponse<T
   const response = await request.get(`/tg/account/${accountId}/groups`)
   return response.data
 }
+
+// 获取账户的私人聊天历史记录
+export const fetchPersonChatHistory = async (accountId: number): Promise<ApiResponse<any>> => {
+  const response = await request.post('/tg/account/fetch_person_chat', {
+    account_id: String(accountId)
+  })
+  return response.data
+}

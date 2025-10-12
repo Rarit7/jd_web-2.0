@@ -4,25 +4,12 @@
       <template #header>
         <div class="card-header">
           <span>标签管理</span>
-          <div class="header-actions">
-            <el-button
-              v-if="activeTab === 'auto-tagging'"
-              type="success"
-              :icon="CaretRight"
-              @click="showExecuteDialog = true"
-            >
-              执行自动标签任务
-            </el-button>
-            <el-button type="primary" @click="showAddDialog = true">添加标签</el-button>
-          </div>
+          <el-button type="primary" @click="showAddDialog = true">添加标签</el-button>
         </div>
       </template>
 
-      <!-- 标签页 -->
-      <el-tabs v-model="activeTab" class="tag-tabs">
-        <!-- 标签管理 -->
-        <el-tab-pane label="标签管理" name="basic">
-          <div v-loading="loading" class="content">
+      <!-- 标签管理内容 -->
+      <div v-loading="loading" class="content">
             <el-table
               :data="tableData"
               style="width: 100%"
@@ -45,7 +32,7 @@
               </el-table-column>
 
               <!-- 绑定关键词 -->
-              <el-table-column label="绑定关键词">
+              <el-table-column label="自动标签绑定关键词">
                 <template #default="{ row }">
                   <div class="keywords-preview">
                     <template v-if="row.keywordsTotal > 0">
@@ -124,22 +111,7 @@
                 />
               </div>
             </el-collapse-transition>
-          </div>
-        </el-tab-pane>
-
-        <!-- 自动标签统计 -->
-        <el-tab-pane label="自动标签统计" name="auto-tagging">
-          <div class="stats-section">
-            <!-- 统计概览 -->
-            <AutoTaggingControl @task-executed="handleTaskExecuted" />
-
-            <!-- 自动标签日志 -->
-            <div class="logs-section">
-              <AutoTaggingLogs @view-detail="handleViewLogDetail" />
-            </div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
+      </div>
     </el-card>
 
     <!-- 添加标签对话框 -->
@@ -238,46 +210,17 @@
       </template>
     </el-dialog>
 
-    <!-- 执行任务对话框 -->
-    <el-dialog v-model="showExecuteDialog" title="执行自动标签任务" width="500px">
-      <el-form :model="executeForm" label-width="120px">
-        <el-form-item label="任务类型">
-          <el-radio-group v-model="executeForm.type">
-            <el-radio value="daily">处理当日数据</el-radio>
-            <el-radio value="historical">处理全部历史数据</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item>
-          <div class="task-description">
-            <div v-if="executeForm.type === 'daily'">
-              处理当日0:00到当前时刻的新增数据，为匹配关键词的用户自动添加标签。
-            </div>
-            <div v-else>
-              对所有历史聊天记录和用户信息进行关键词匹配。可能需要较长时间。
-            </div>
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showExecuteDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleExecuteTask" :loading="executeLoading">
-          执行任务
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, CaretRight, DocumentAdd, Close, Edit } from '@element-plus/icons-vue'
+import { Plus, Close, Edit } from '@element-plus/icons-vue'
 import type { FormInstance } from 'element-plus'
 import { tagsApi, type Tag } from '@/api/tags'
 import KeywordForm from '@/views/components/KeywordForm.vue'
 import KeywordList from '@/views/components/KeywordList.vue'
-import AutoTaggingControl from '@/views/components/AutoTaggingControl.vue'
-import AutoTaggingLogs from '@/views/components/AutoTaggingLogs.vue'
 
 // 响应式数据
 const loading = ref(false)
@@ -288,10 +231,7 @@ const showAddDialog = ref(false)
 const showEditDialog = ref(false)
 const showKeywordDialog = ref(false)
 const showBatchDialog = ref(false)
-const showExecuteDialog = ref(false)
-const executeLoading = ref(false)
 const tableData = ref<Tag[]>([])
-const activeTab = ref('basic')
 const selectedTagId = ref<number>()
 const expandedTagId = ref<number | null>(null)
 const currentBatchTagId = ref<number>()
@@ -343,11 +283,6 @@ const editRules = {
 const batchForm = reactive({
   keywords: '',
   autoFocus: false
-})
-
-// 执行任务表单
-const executeForm = reactive({
-  type: 'daily' as 'daily' | 'historical'
 })
 
 // 计算属性：当前展开的标签
@@ -409,12 +344,6 @@ const openBatchImport = (row: Tag) => {
   currentBatchTagId.value = row.id
   selectedTagId.value = row.id
   showBatchDialog.value = true
-}
-
-// 查看日志详情
-const handleViewLogDetail = (log: any) => {
-  // TODO: 实现日志详情抽屉
-  console.log('View log detail:', log)
 }
 
 // 添加标签
@@ -508,17 +437,6 @@ const deleteTag = async (row: Tag) => {
   }
 }
 
-// 查看关键词（切换到自动标签页）
-const viewKeywords = (row: Tag) => {
-  activeTab.value = 'auto-tagging'
-  selectedTagId.value = row.id
-}
-
-// 标签变更处理
-const handleTagChange = (tagId: number) => {
-  selectedTagId.value = tagId
-}
-
 // 关键词添加成功处理
 const handleKeywordSuccess = () => {
   showKeywordDialog.value = false
@@ -584,39 +502,6 @@ const handleBatchImport = async () => {
   } finally {
     batchLoading.value = false
   }
-}
-
-// 执行自动标签任务
-const handleExecuteTask = async () => {
-  executeLoading.value = true
-  try {
-    const response = await tagsApi.executeAutoTagging({ type: executeForm.type })
-    if (response.err_code === 0) {
-      const payload = response.payload
-      if (payload.status === 'WAITING') {
-        ElMessage.info(`任务已加入等待队列，队列位置：${payload.queue_position || 1}`)
-      } else if (payload.status === 'SUCCESS') {
-        ElMessage.success('任务执行成功')
-      } else {
-        ElMessage.success('任务已提交')
-      }
-      showExecuteDialog.value = false
-      fetchData() // 刷新标签列表
-    } else {
-      ElMessage.error(response.err_msg || '任务提交失败')
-    }
-  } catch (error) {
-    console.error('任务执行失败:', error)
-    // 错误消息已经在axios拦截器中显示
-  } finally {
-    executeLoading.value = false
-  }
-}
-
-// 任务执行处理
-const handleTaskExecuted = () => {
-  ElMessage.success('任务已提交')
-  fetchData() // 刷新标签列表
 }
 
 // 页面加载时获取数据
@@ -716,19 +601,6 @@ onMounted(() => {
   gap: 8px;
 }
 
-/* 自动标签统计区域 */
-.stats-section {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
-}
-
-.logs-section {
-  margin-top: 24px;
-  width: 100%;
-}
-
 .color-picker {
   display: flex;
   gap: 8px;
@@ -755,58 +627,9 @@ onMounted(() => {
   transform: scale(1.1);
 }
 
-.tag-tabs {
-  margin-top: 16px;
-}
-
-.auto-tagging-section {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.tag-selector {
-  margin-bottom: 24px;
-}
-
-.keywords-section {
-  margin-top: 24px;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.section-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.section-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.control-panel {
-  margin-top: 32px;
-}
-
 .form-tip {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
-}
-
-.task-description {
-  padding: 12px;
-  background-color: #f5f7fa;
-  border-radius: 4px;
-  color: #606266;
-  font-size: 14px;
-  line-height: 1.5;
 }
 </style>

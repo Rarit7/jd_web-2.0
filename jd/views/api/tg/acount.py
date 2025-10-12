@@ -231,16 +231,31 @@ def tg_account_delete():
     }
 
 
-@api.route('/tg/account/chat/search', methods=['POST'])
-def tg_account_chat_search():
+@api.route('/tg/account/fetch_person_chat', methods=['POST'])
+def tg_account_fetch_person_chat():
+    """获取账户的私人聊天历史记录"""
     account_id = get_or_exception('account_id', request.json, 'str')
     account_id_list = [int(i) for i in account_id.split(',')]
     tg_accounts = TgAccount.query.filter(TgAccount.id.in_(account_id_list),
                                          TgAccount.status == TgAccount.StatusType.JOIN_SUCCESS).all()
-    for account in tg_accounts:
-        fetch_person_chat_history.delay(account.id)
 
-    return success({'message': '获取聊天记录任务已启动'})
+    if not tg_accounts:
+        raise APIException('未找到有效的已登录账户')
+
+    task_results = []
+    for account in tg_accounts:
+        task = fetch_person_chat_history.delay(account.id)
+        task_results.append({
+            'account_id': account.id,
+            'account_name': account.name,
+            'task_id': task.id
+        })
+
+    return success({
+        'message': f'已开始获取 {len(tg_accounts)} 个账户的私人聊天记录',
+        'total_accounts': len(tg_accounts),
+        'tasks': task_results
+    })
 
 
 @api.route('/tg/account/tow_step_check', methods=['GET'])

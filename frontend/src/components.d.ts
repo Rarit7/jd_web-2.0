@@ -11,6 +11,7 @@ declare module 'vue' {
     AppLayout: typeof import('./components/layouts/AppLayout.vue')['default']
     AppMain: typeof import('./components/layouts/AppMain.vue')['default']
     Breadcrumb: typeof import('./components/common/Breadcrumb.vue')['default']
+    ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElBadge: typeof import('element-plus/es')['ElBadge']
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']

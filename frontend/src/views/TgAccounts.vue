@@ -40,7 +40,7 @@
             {{ formatUTCToLocal(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" fixed="right" width="300">
+        <el-table-column label="操作" fixed="right" width="400">
           <template #default="scope">
             <el-button
               size="small"
@@ -65,14 +65,21 @@
             >
               获取群组
             </el-button>
-            <el-popconfirm
-              title="确定删除此账户吗？"
-              @confirm="handleDelete(scope.row)"
+            <el-button
+              size="small"
+              type="primary"
+              @click="handleFetchPersonChat(scope.row)"
+              :disabled="scope.row.status !== 1"
             >
-              <template #reference>
-                <el-button size="small" type="danger">删除</el-button>
-              </template>
-            </el-popconfirm>
+              获取私人聊天
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="handleDeleteClick(scope.row)"
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -137,6 +144,81 @@
         <el-button type="primary" @click="handleLoginNext" :loading="loginLoading">
           {{ getLoginButtonText() }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 获取群组信息确认对话框 -->
+    <el-dialog v-model="showFetchGroupDialog" title="获取群组信息" width="500px">
+      <div v-if="selectedAccountForGroup" style="line-height: 1.8;">
+        <p style="margin-bottom: 16px;">
+          确定要获取账户 <strong>"{{ selectedAccountForGroup.name }}"</strong>
+          ({{ selectedAccountForGroup.phone }}) 的群组信息吗？
+        </p>
+        <el-alert type="info" :closable="false" style="margin-bottom: 16px;">
+          <p style="margin: 0 0 8px 0; font-weight: 600;">系统将获取该账户的所有群聊和频道信息，包括：</p>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>群组和频道列表</li>
+            <li>群组基本信息</li>
+            <li>建立会话关系</li>
+          </ul>
+        </el-alert>
+        <p style="color: #909399; font-size: 13px; margin: 0;">
+          处理过程在后台进行，完成后可在"群组管理"页面查看。此操作可能需要一些时间。
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="showFetchGroupDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmFetchGroup">开始获取</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 获取私人聊天确认对话框 -->
+    <el-dialog v-model="showFetchPersonChatDialog" title="获取私人聊天记录" width="500px">
+      <div v-if="selectedAccountForFetch" style="line-height: 1.8;">
+        <p style="margin-bottom: 16px;">
+          确定要获取账户 <strong>"{{ selectedAccountForFetch.name }}"</strong>
+          ({{ selectedAccountForFetch.phone }}) 的私人聊天记录吗？
+        </p>
+        <el-alert type="info" :closable="false" style="margin-bottom: 16px;">
+          <p style="margin: 0 0 8px 0; font-weight: 600;">系统将获取该账户的所有私人对话，包括：</p>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>聊天消息内容</li>
+            <li>用户信息和头像</li>
+            <li>媒体文件等数据</li>
+          </ul>
+        </el-alert>
+        <p style="color: #909399; font-size: 13px; margin: 0;">
+          处理过程在后台进行，完成后可在"聊天历史"页面查看。此操作可能需要几分钟时间。
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="showFetchPersonChatDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmFetchPersonChat">开始获取</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 删除账户确认对话框 -->
+    <el-dialog v-model="showDeleteDialog" title="删除账户" width="500px">
+      <div v-if="selectedAccountForDelete" style="line-height: 1.8;">
+        <p style="margin-bottom: 16px;">
+          确定要删除账户 <strong>"{{ selectedAccountForDelete.name }}"</strong>
+          ({{ selectedAccountForDelete.phone }}) 吗？
+        </p>
+        <el-alert type="error" :closable="false" style="margin-bottom: 16px;">
+          <p style="margin: 0 0 8px 0; font-weight: 600;">删除后将：</p>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li>永久删除该账户配置</li>
+            <li>解除所有群组会话关系</li>
+            <li>此操作不可恢复</li>
+          </ul>
+        </el-alert>
+        <p style="color: #f56c6c; font-size: 13px; margin: 0; font-weight: 600;">
+          ⚠️ 警告：此操作无法撤销，请谨慎操作！
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="showDeleteDialog = false">取消</el-button>
+        <el-button type="danger" @click="confirmDelete">确认删除</el-button>
       </template>
     </el-dialog>
 
@@ -209,7 +291,8 @@ import {
   deleteAccount,
   getAccountStatus,
   fetchAccountGroupInfo,
-  getAccountGroups
+  getAccountGroups,
+  fetchPersonChatHistory
 } from '@/api/tg-accounts'
 import type { TgAccount, TgAccountStatusResponse, TgAccountGroup } from '@/api/tg-accounts'
 import { formatUTCToLocal } from '@/utils/date'
@@ -220,6 +303,12 @@ const loading = ref(false)
 const showAddDialog = ref(false)
 const showLoginDialog = ref(false)
 const showStatusDialog = ref(false)
+const showFetchPersonChatDialog = ref(false)
+const showFetchGroupDialog = ref(false)
+const showDeleteDialog = ref(false)
+const selectedAccountForFetch = ref<TgAccount | null>(null)
+const selectedAccountForGroup = ref<TgAccount | null>(null)
+const selectedAccountForDelete = ref<TgAccount | null>(null)
 const adding = ref(false)
 const loginLoading = ref(false)
 const loginStep = ref(1) // 1: API凭证, 2: 验证码, 3: 2FA密码
@@ -490,40 +579,94 @@ const handleViewStatus = async (account: TgAccount) => {
   }
 }
 
-// 搜索聊天记录
-const handleSearchHistory = async (account: TgAccount) => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要获取此账户的群组信息吗？系统将获取所有群聊和频道信息，并建立会话关系。这可能需要一些时间。',
-      '确认获取群组信息',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
+// 获取群组信息 - 打开确认对话框
+const handleSearchHistory = (account: TgAccount) => {
+  selectedAccountForGroup.value = account
+  showFetchGroupDialog.value = true
+}
 
-    const response = await fetchAccountGroupInfo(account.id)
+// 确认获取群组信息
+const confirmFetchGroup = async () => {
+  if (!selectedAccountForGroup.value) return
+
+  showFetchGroupDialog.value = false
+
+  try {
+    const response = await fetchAccountGroupInfo(selectedAccountForGroup.value.id)
     if (response.err_code === 0) {
-      ElMessage.success(`已开始获取账户 ${account.name} 的群组信息，任务ID: ${response.payload.task_id}`)
+      ElMessage.success({
+        message: `已开始获取账户 ${selectedAccountForGroup.value.name} 的群组信息，任务ID: ${response.payload.task_id}`,
+        duration: 5000,
+        showClose: true
+      })
     } else {
       ElMessage.error(response.err_msg || '获取群组信息失败')
     }
   } catch (error: any) {
-    if (error === 'cancel') {
-      console.log('用户取消操作')
-    } else {
-      ElMessage.error('获取群组信息失败: ' + (error.response?.data?.err_msg || error.message))
-      console.error('Fetch group info error:', error)
-    }
+    ElMessage.error('获取群组信息失败: ' + (error.response?.data?.err_msg || error.message))
+    console.error('Fetch group info error:', error)
+  } finally {
+    selectedAccountForGroup.value = null
   }
 }
 
-// 删除账户
-const handleDelete = async (account: TgAccount) => {
+// 获取私人聊天记录 - 打开确认对话框
+const handleFetchPersonChat = (account: TgAccount) => {
+  selectedAccountForFetch.value = account
+  showFetchPersonChatDialog.value = true
+}
+
+// 确认获取私人聊天记录
+const confirmFetchPersonChat = async () => {
+  if (!selectedAccountForFetch.value) return
+
+  showFetchPersonChatDialog.value = false
+
   try {
-    console.log('开始删除账户:', account.id)
-    const response = await deleteAccount(account.id)
+    const response = await fetchPersonChatHistory(selectedAccountForFetch.value.id)
+    if (response.err_code === 0) {
+      const payload = response.payload
+      let message = `已成功启动私人聊天记录获取任务`
+
+      if (payload.total_accounts) {
+        message += `，共 ${payload.total_accounts} 个账户`
+      }
+
+      if (payload.tasks && payload.tasks.length > 0) {
+        message += `，任务ID: ${payload.tasks[0].task_id}`
+      }
+
+      ElMessage.success({
+        message: message,
+        duration: 5000,
+        showClose: true
+      })
+    } else {
+      ElMessage.error(response.err_msg || '获取私人聊天记录失败')
+    }
+  } catch (error: any) {
+    ElMessage.error('获取私人聊天记录失败: ' + (error.response?.data?.err_msg || error.message))
+    console.error('Fetch person chat error:', error)
+  } finally {
+    selectedAccountForFetch.value = null
+  }
+}
+
+// 删除账户 - 打开确认对话框
+const handleDeleteClick = (account: TgAccount) => {
+  selectedAccountForDelete.value = account
+  showDeleteDialog.value = true
+}
+
+// 确认删除账户
+const confirmDelete = async () => {
+  if (!selectedAccountForDelete.value) return
+
+  showDeleteDialog.value = false
+
+  try {
+    console.log('开始删除账户:', selectedAccountForDelete.value.id)
+    const response = await deleteAccount(selectedAccountForDelete.value.id)
     console.log('删除API响应:', response)
     if (response.err_code === 0) {
       ElMessage.success('删除成功')
@@ -534,6 +677,8 @@ const handleDelete = async (account: TgAccount) => {
   } catch (error: any) {
     console.error('删除失败，详细错误:', error)
     ElMessage.error('删除失败: ' + (error.response?.data?.err_msg || error.message))
+  } finally {
+    selectedAccountForDelete.value = null
   }
 }
 

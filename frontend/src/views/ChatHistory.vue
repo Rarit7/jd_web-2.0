@@ -444,6 +444,26 @@ import { chatHistoryApi, type ChatMessage, type UserChatHistoryResponse } from '
 import { useRoute } from 'vue-router'
 import { formatTime, formatDateForApi, formatUTCToLocal } from '@/utils/date'
 import UserDetailDrawer from '@/components/UserDetailDrawer.vue'
+import {
+  buildAvatarUrl,
+  buildImageUrl,
+  hasTextContent,
+  isImageFile,
+  getFileType,
+  formatFileSize,
+  getImageDocumentsFromLegacy,
+  getImageDocuments,
+  getNonImageDocumentsFromLegacy,
+  getNonImageDocuments,
+  hasImageContent,
+  hasFileContent,
+  determineMainMessageType,
+  getFileName,
+  stringHashCode,
+  highlightKeyword,
+  formatSearchTime,
+  type DocumentInfo
+} from './chat-history/utils'
 
 // Route实例
 const route = useRoute()
@@ -465,19 +485,6 @@ interface Chat {
   photo: string
   group_type: number
   records_count: number
-}
-
-interface DocumentInfo {
-  path: string
-  ext: string
-  mime_type: string
-  is_sticker?: boolean
-  sticker_type?: string
-  display_text?: string
-  display_icon?: string
-  filename_origin?: string
-  file_size?: number
-  video_thumb_path?: string
 }
 
 interface FileInfo {
@@ -633,48 +640,6 @@ const fetchChatList = async () => {
     loading.value = false
   }
 }
-
-// 构建头像URL
-const buildAvatarUrl = (avatarPath: string): string => {
-  if (!avatarPath) return ''
-  
-  // 如果已经是完整URL，直接返回
-  if (avatarPath.startsWith('http://') || avatarPath.startsWith('https://')) {
-    return avatarPath
-  }
-  
-  // 如果是相对路径，构建完整路径
-  if (avatarPath.startsWith('images/')) {
-    return `/static/${avatarPath}`
-  }
-  
-  // 否则假设是文件名，添加avatar目录前缀
-  return `/static/images/avatar/${avatarPath}`
-}
-
-// 构建图片URL
-const buildImageUrl = (imagePath: string): string => {
-  if (!imagePath) return ''
-  
-  // 如果已经是完整URL，直接返回
-  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-    return imagePath
-  }
-  
-  // 如果是相对路径，构建完整路径
-  if (imagePath.startsWith('images/') || imagePath.startsWith('document/')) {
-    return `/static/${imagePath}`
-  }
-  
-  // 如果是视频缩略图路径，添加document前缀
-  if (imagePath.startsWith('thumbs/')) {
-    return `/static/document/${imagePath}`
-  }
-  
-  // 如果只是文件名，添加images目录前缀
-  return `/static/images/${imagePath}`
-}
-
 
 // 获取选中群组的聊天记录
 const fetchMessages = async (chatId: string) => {
@@ -996,181 +961,6 @@ const fetchMessagesForPage = async (chatId: string, page: number) => {
 }
 
 
-// 检查消息内容类型的辅助函数
-const hasTextContent = (msg: ChatMessage): boolean => {
-  return !!(msg.message && msg.message.trim())
-}
-
-// 判断文件是否为图片类型（优先使用MIME类型，回退到扩展名判断）
-const isImageFile = (doc: DocumentInfo): boolean => {
-  
-  // 如果是sticker，应该被当作文件处理而不是图片
-  if (doc.is_sticker) {
-    return false
-  }
-  
-  // 优先使用MIME类型判断
-  if (doc.mime_type) {
-    const result = doc.mime_type.startsWith('image/')
-    return result
-  }
-  
-  // 回退到扩展名判断（向后兼容）
-  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif']
-  const result = imageExtensions.includes(doc.ext.toLowerCase().replace('.', ''))
-  return result
-}
-
-// 判断文件类型
-const getFileType = (doc: DocumentInfo): string => {
-  // 动画表情
-  if (doc.is_sticker) {
-    return 'sticker'
-  }
-  
-  // 优先使用MIME类型判断
-  if (doc.mime_type) {
-    if (doc.mime_type.startsWith('video/')) {
-      return 'video'
-    } else if (doc.mime_type.startsWith('audio/')) {
-      return 'audio'
-    } else if (doc.mime_type.startsWith('image/')) {
-      return 'image'
-    }
-  }
-  
-  // 回退到扩展名判断
-  const ext = doc.ext.toLowerCase().replace('.', '')
-  
-  // 视频文件
-  if (['mp4', 'mkv', 'webm', 'mov', 'avi', 'wmv', 'flv', 'asf', 'rm', 'rmvb', '3gp'].includes(ext)) {
-    return 'video'
-  }
-  
-  // 音频文件
-  if (['mp3', 'flac', 'wav', 'ogg', 'aac', 'm4a', 'wma'].includes(ext)) {
-    return 'audio'
-  }
-  
-  // 压缩文件
-  if (['zip', 'rar', '7z', 'gz', 'bz2', 'tar', 'xz', 'lzma'].includes(ext)) {
-    return 'archive'
-  }
-  
-  // 文档文件
-  if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'odt'].includes(ext)) {
-    return 'document'
-  }
-  
-  // 程序文件
-  if (['apk', 'exe', 'msi', 'deb', 'rpm', 'dmg', 'elf', 'app'].includes(ext)) {
-    return 'program'
-  }
-  
-  // 其他类型
-  return 'other'
-}
-
-// 格式化文件大小
-const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B'
-  
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-// 从document_paths中提取图片类型的文档（向后兼容）
-const getImageDocumentsFromLegacy = (msg: ChatMessage): DocumentInfo[] => {
-  if (!msg.document_paths || msg.document_paths.length === 0) return []
-  return msg.document_paths
-    .filter(path => path && path.trim())
-    .map(path => {
-      const pathParts = path.split('.')
-      const ext = pathParts.length > 1 ? pathParts[pathParts.length - 1] : ''
-      return { path: path.trim(), ext, mime_type: '' }
-    })
-    .filter(doc => isImageFile(doc))
-}
-
-// 从documents中提取图片类型的文档
-const getImageDocuments = (msg: ChatMessage): DocumentInfo[] => {
-  if (!msg.documents || msg.documents.length === 0) {
-    // 如果没有新的documents字段，尝试从旧的document_paths中提取图片
-    return getImageDocumentsFromLegacy(msg)
-  }
-  return msg.documents.filter(doc => isImageFile(doc))
-}
-
-// 从document_paths中提取非图片类型的文档（向后兼容）
-const getNonImageDocumentsFromLegacy = (msg: ChatMessage): DocumentInfo[] => {
-  if (!msg.document_paths || msg.document_paths.length === 0) return []
-  return msg.document_paths
-    .filter(path => path && path.trim())
-    .map(path => {
-      const pathParts = path.split('.')
-      const ext = pathParts.length > 1 ? pathParts[pathParts.length - 1] : ''
-      return { path: path.trim(), ext, mime_type: '' }
-    })
-    .filter(doc => !isImageFile(doc))
-}
-
-// 从documents中提取非图片类型的文档  
-const getNonImageDocuments = (msg: ChatMessage): DocumentInfo[] => {
-  
-  if (!msg.documents || msg.documents.length === 0) {
-    // 如果没有新的documents字段，尝试从旧的document_paths中提取非图片文档
-    const legacyResult = getNonImageDocumentsFromLegacy(msg)
-    return legacyResult
-  }
-  
-  const result = msg.documents.filter(doc => !isImageFile(doc))
-  
-  return result
-}
-
-const hasImageContent = (msg: ChatMessage): boolean => {
-  const hasPhotos = !!(msg.photo_paths && msg.photo_paths.length > 0 && msg.photo_paths[0])
-  const hasImageDocs = getImageDocuments(msg).length > 0
-  return hasPhotos || hasImageDocs
-}
-
-const hasFileContent = (msg: ChatMessage): boolean => {
-  // 统一检查非图片类型的文档（自动处理新旧格式）
-  return getNonImageDocuments(msg).length > 0
-}
-
-// 判断消息的主要类型（用于向后兼容和搜索结果显示）
-const determineMainMessageType = (msg: ChatMessage): 'text' | 'image' | 'file' | 'mixed' => {
-  const hasText = hasTextContent(msg)
-  const hasImage = hasImageContent(msg)
-  const hasFile = hasFileContent(msg)
-  
-  // 计算内容类型数量
-  const contentTypes = [hasText, hasImage, hasFile].filter(Boolean).length
-  
-  if (contentTypes > 1) {
-    return 'mixed'  // 混合类型
-  } else if (hasImage) {
-    return 'image'
-  } else if (hasFile) {
-    return 'file'
-  } else {
-    return 'text'
-  }
-}
-
-// 获取文件名
-const getFileName = (documentPaths: string[]): string => {
-  if (documentPaths && documentPaths.length > 0 && documentPaths[0]) {
-    const path = documentPaths[0]
-    return path.split('/').pop() || path
-  }
-  return ''
-}
-
 // 计算属性
 const filteredChats = computed(() => {
   if (!searchText.value) {
@@ -1254,18 +1044,6 @@ const handleUserIdClear = async () => {
     // 清空用户ID搜索后重新加载正常消息
     await selectChat(selectedChat.id)
   }
-}
-
-// 字符串哈希函数
-const stringHashCode = (str: string): number => {
-  let hash = 0
-  if (str.length === 0) return hash
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // 转为32位整数
-  }
-  return Math.abs(hash)
 }
 
 // 获取私人聊天列表 - 已禁用，不再显示私人聊天
@@ -1796,24 +1574,6 @@ const findMessageAcrossPages = async (targetMessage: Message) => {
   } finally {
     messageLoading.value = false
   }
-}
-
-// 高亮关键词
-const highlightKeyword = (content: string, keyword: string) => {
-  if (!keyword || !content) return content
-  
-  const regex = new RegExp(`(${keyword})`, 'gi')
-  return content.replace(regex, '<mark class="highlight">$1</mark>')
-}
-
-// 格式化搜索结果时间
-const formatSearchTime = (timeString: string): string => {
-  if (!timeString) return ''
-  
-  // 使用统一的UTC+8时间格式化函数，但只显示到分钟
-  const formatted = formatUTCToLocal(timeString)
-  // 截取前16位：YYYY/MM/DD HH:mm
-  return formatted.substring(0, 16)
 }
 
 // 搜索历史管理方法

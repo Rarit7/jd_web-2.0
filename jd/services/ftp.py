@@ -9,6 +9,7 @@ from jd import app
 from jd.models.tg_group import TgGroup
 from jd.models.tg_group_chat_history import TgGroupChatHistory
 from jd.models.tg_group_user_info import TgGroupUserInfo
+from config import FTP_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +22,10 @@ class FtpService:
         max_retries = 5
         for i in range(max_retries):
             try:
-                cls.ftp = FTP(timeout=60)
-                cls.ftp.connect('120.224.39.232', 21)
-                cls.ftp.login(user='rzx_rzy', passwd='rzx_rzy')
-                cls.ftp.encoding = 'utf-8'
+                cls.ftp = FTP(timeout=FTP_CONFIG['timeout'])
+                cls.ftp.connect(FTP_CONFIG['host'], FTP_CONFIG['port'])
+                cls.ftp.login(user=FTP_CONFIG['user'], passwd=FTP_CONFIG['password'])
+                cls.ftp.encoding = FTP_CONFIG['encoding']
                 logger.info('ftp connect success')
                 print('ftp connect success')
                 return True

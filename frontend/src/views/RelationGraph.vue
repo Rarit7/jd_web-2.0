@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span class="card-title">关联图谱</span>
+          <span>关联图谱</span>
         </div>
       </template>
       <el-empty description="功能开发中，敬请期待...">
@@ -23,17 +23,35 @@ import { Share } from '@element-plus/icons-vue'
 
 <style scoped lang="scss">
 .relation-graph-container {
-  padding: 20px;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  > .el-card {
+    width: 100%;
+    flex: 1;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+
+    :deep(.el-card__body) {
+      padding: 20px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+    }
+  }
 
   .card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-
-    .card-title {
-      font-size: 18px;
-      font-weight: 600;
-    }
   }
 
   .el-empty {

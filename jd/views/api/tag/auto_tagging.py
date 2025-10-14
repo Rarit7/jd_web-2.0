@@ -77,6 +77,28 @@ def get_tag_keywords(tag_id):
     })
 
 
+@api.route('/tag/tag-keywords/<int:tag_id>/all', methods=['GET'])
+def get_all_tag_keywords(tag_id):
+    """获取标签的所有活跃关键词（无分页，用于下拉选择）"""
+    try:
+        # 只获取活跃的关键词
+        keywords = TagKeywordMapping.query.filter_by(
+            tag_id=tag_id,
+            is_active=True
+        ).order_by(TagKeywordMapping.keyword).all()
+
+        return jsonify({
+            'err_code': 0,
+            'payload': {
+                'data': [{'id': k.id, 'keyword': k.keyword} for k in keywords],
+                'total': len(keywords)
+            }
+        })
+    except Exception as e:
+        logger.error(f'获取标签关键词失败: {str(e)}', exc_info=True)
+        return jsonify({'err_code': 1, 'err_msg': f'获取标签关键词失败: {str(e)}'})
+
+
 @api.route('/tag/tag-keywords/<int:keyword_id>', methods=['PUT'])
 def update_tag_keyword(keyword_id):
     """更新标签关键词映射"""
@@ -350,6 +372,7 @@ def get_auto_tag_logs():
     tag_id = request.args.get('tag_id', type=int)
     user_id = request.args.get('user_id')
     source_type = request.args.get('source_type')
+    keywords = request.args.get('keywords')  # 逗号分隔的关键词列表
 
     query = AutoTagLog.query
 
@@ -359,6 +382,11 @@ def get_auto_tag_logs():
         query = query.filter_by(tg_user_id=user_id)
     if source_type:
         query = query.filter_by(source_type=source_type)
+    if keywords:
+        # 将逗号分隔的字符串转换为列表
+        keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
+        if keyword_list:
+            query = query.filter(AutoTagLog.keyword.in_(keyword_list))
 
     query = query.order_by(AutoTagLog.created_at.desc())
 
@@ -381,12 +409,22 @@ def get_auto_tag_logs():
 def get_auto_tagging_stats():
     """获取自动标签统计信息"""
     try:
-        # 按标签统计
+        from jd.models.result_tag import ResultTag
+
+        # 按标签统计（包含标签名称，按用户数排序，取前10）
         tag_stats = db.session.query(
             AutoTagLog.tag_id,
+            ResultTag.title.label('tag_name'),
+            ResultTag.color.label('tag_color'),
             db.func.count(AutoTagLog.id).label('tag_count'),
             db.func.count(db.distinct(AutoTagLog.tg_user_id)).label('user_count')
-        ).group_by(AutoTagLog.tag_id).all()
+        ).join(
+            ResultTag, AutoTagLog.tag_id == ResultTag.id
+        ).group_by(
+            AutoTagLog.tag_id, ResultTag.title, ResultTag.color
+        ).order_by(
+            db.text('user_count DESC')
+        ).limit(10).all()
 
         # 按来源类型统计
         source_stats = db.session.query(
@@ -416,6 +454,8 @@ def get_auto_tagging_stats():
                 'tag_stats': [
                     {
                         'tag_id': stat.tag_id,
+                        'tag_name': stat.tag_name,
+                        'tag_color': stat.tag_color,
                         'tag_count': stat.tag_count,
                         'user_count': stat.user_count
                     } for stat in tag_stats
@@ -435,6 +475,7 @@ def get_auto_tagging_stats():
             }
         })
     except Exception as e:
+        logger.error(f'获取统计信息失败: {str(e)}', exc_info=True)
         return jsonify({'err_code': 1, 'err_msg': f'获取统计信息失败: {str(e)}'})
 
 

@@ -20,6 +20,8 @@ export interface TgUser {
   is_key_focus?: boolean
   chat_id?: string
   group_name?: string
+  groups?: Array<{ chat_id: string; name: string }>
+  group_ids?: string[]
 }
 
 export interface UserListParams {

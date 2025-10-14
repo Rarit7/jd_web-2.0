@@ -16,6 +16,7 @@ from jd.utils.logging_config import get_logger
 from jd.models.tg_account import TgAccount
 from jd.models.tg_person_chat_history import TgPersonChatHistory
 from jd.jobs.tg_base_history_fetcher import BaseTgHistoryFetcher
+from jd.jobs.tg_user_info import TgUserInfoProcessor
 from jd.tasks.base_task import AsyncBaseTask
 
 logger = get_logger('jd.jobs.tg.person_dialog', {
@@ -32,6 +33,7 @@ class PersonChatHistoryFetcher(BaseTgHistoryFetcher):
         self.account_id = account_id
         self.account = None
         self.owner_user_id = None
+        self.user_info_processor = None  # 用户信息处理器
 
     def _load_account_info(self):
         """加载账户信息"""
@@ -90,6 +92,19 @@ class PersonChatHistoryFetcher(BaseTgHistoryFetcher):
             return 0
 
         try:
+            # 0. 批量保存用户信息到tg_group_user_info表
+            if self.user_info_processor:
+                # 预处理用户缓存
+                await self.user_info_processor.prepare_batch_user_cache(batch_messages, chat_id)
+                # 批量保存用户信息
+                for data in batch_messages:
+                    await self.user_info_processor.save_user_info_from_message(data, chat_id)
+                # 提交待写入的变更记录
+                self.user_info_processor._flush_pending_changes()
+            else:
+                logger.warning('用户信息处理器未初始化，跳过用户信息保存')
+
+
             # 1. 批量检查重复消息
             message_ids = [str(msg.get("message_id", 0)) for msg in batch_messages if msg.get("message_id")]
             existing_ids = set()
@@ -232,6 +247,10 @@ class PersonChatHistoryFetcher(BaseTgHistoryFetcher):
             success = await self.init_telegram_service(session_names)
             if not success:
                 raise Exception('Telegram服务初始化失败')
+
+            # 2.5. 初始化用户信息处理器
+            self.user_info_processor = TgUserInfoProcessor(self.tg)
+            logger.info('用户信息处理器已初始化')
 
             # 3. 获取私人对话列表
             dialog_list = await self.get_private_dialog_list()

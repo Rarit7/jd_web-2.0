@@ -108,32 +108,58 @@ def tg_group_user_list():
             parse_tag_result[p.tg_user_id].append(str(p.tag_id))
         tag_dict = {t['id']: t['name'] for t in tag_list}
 
-        data = []
+        # Group by user_id to deduplicate users
+        user_groups = collections.defaultdict(list)
         for group_user in group_user_list:
-            parse_tag = parse_tag_result.get(str(group_user.user_id), [])
+            user_groups[str(group_user.user_id)].append(group_user)
+
+        data = []
+        for user_id, user_records in user_groups.items():
+            # Use the most recently updated record as the main record
+            main_record = max(user_records, key=lambda x: x.updated_at if x.updated_at else x.created_at)
+
+            parse_tag = parse_tag_result.get(user_id, [])
             tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
-            
+
+            # Collect all groups for this user
+            groups_list = []
+            group_ids_list = []
+            for record in user_records:
+                group_name = chat_room.get(record.chat_id, '')
+                if group_name:
+                    groups_list.append({
+                        'chat_id': record.chat_id,
+                        'name': group_name
+                    })
+                    group_ids_list.append(record.chat_id)
+
+            # Determine if user is key focus (if any record has is_key_focus=True)
+            is_key_focus = any(bool(record.is_key_focus) if hasattr(record, 'is_key_focus') else False
+                             for record in user_records)
+
             # 格式化数据以匹配前端TgUser接口
             user_data = {
-                'id': group_user.id,
-                'user_id': str(group_user.user_id),
-                'username': group_user.username or '',
-                'first_name': group_user.nickname or '',
+                'id': main_record.id,
+                'user_id': user_id,
+                'username': main_record.username or '',
+                'first_name': main_record.nickname or '',
                 'last_name': '',
-                'nickname': group_user.nickname or '',
-                'avatar': group_user.avatar_path or '',
+                'nickname': main_record.nickname or '',
+                'avatar': main_record.avatar_path or '',
                 'phone': '',
-                'bio': group_user.desc or '',
-                'notes': group_user.remark or '',
+                'bio': main_record.desc or '',
+                'notes': main_record.remark or '',
                 'tags': tag_text,
                 'tag_id_list': ','.join(parse_tag) if parse_tag else '',
                 'status': 'active',
-                'last_seen': group_user.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group_user.updated_at else '',
-                'created_at': group_user.created_at.strftime('%Y-%m-%d %H:%M:%S') if group_user.created_at else '',
-                'updated_at': group_user.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group_user.updated_at else '',
-                'chat_id': group_user.chat_id,
-                'group_name': chat_room.get(group_user.chat_id, ''),
-                'is_key_focus': bool(group_user.is_key_focus) if hasattr(group_user, 'is_key_focus') else False
+                'last_seen': main_record.updated_at.strftime('%Y-%m-%d %H:%M:%S') if main_record.updated_at else '',
+                'created_at': main_record.created_at.strftime('%Y-%m-%d %H:%M:%S') if main_record.created_at else '',
+                'updated_at': main_record.updated_at.strftime('%Y-%m-%d %H:%M:%S') if main_record.updated_at else '',
+                'chat_id': main_record.chat_id,
+                'group_name': chat_room.get(main_record.chat_id, ''),
+                'groups': groups_list,  # Array of all groups this user is in
+                'group_ids': group_ids_list,  # Array of all group IDs
+                'is_key_focus': is_key_focus
             }
             data.append(user_data)
 
@@ -235,11 +261,11 @@ def tg_group_user_modify_tag():
 
 @api.route('/tg/group_user/focus/toggle', methods=['POST'])
 def tg_group_user_toggle_focus():
-    """切换用户关注状态"""
+    """切换用户关注状态 - 应用到该用户在所有群组的记录"""
     try:
         args = request.json
         tg_user_id = get_or_exception('tg_user_id', args, 'int')
-        
+
         user = TgGroupUserInfo.query.filter(TgGroupUserInfo.id == tg_user_id).first()
         if not user:
             return jsonify({
@@ -247,16 +273,20 @@ def tg_group_user_toggle_focus():
                 'err_msg': '用户不存在',
                 'payload': {}
             }), 404
-        
+
+        # Get the telegram user_id from this record
+        telegram_user_id = user.user_id
+
         # 切换关注状态
         current_focus = bool(user.is_key_focus) if hasattr(user, 'is_key_focus') else False
         new_focus = not current_focus
-        
-        TgGroupUserInfo.query.filter(TgGroupUserInfo.id == tg_user_id).update({
+
+        # Update ALL records with the same telegram user_id across all groups
+        TgGroupUserInfo.query.filter(TgGroupUserInfo.user_id == telegram_user_id).update({
             'is_key_focus': new_focus
         })
         db.session.commit()
-        
+
         return jsonify({
             'err_code': 0,
             'err_msg': '操作成功',
@@ -438,31 +468,53 @@ def tg_group_user_key_focus_list():
             parse_tag_result[p.tg_user_id].append(str(p.tag_id))
         tag_dict = {t['id']: t['name'] for t in tag_list}
 
-        data = []
+        # Group by user_id to deduplicate users
+        user_groups = collections.defaultdict(list)
         for group_user in group_user_list:
-            parse_tag = parse_tag_result.get(str(group_user.user_id), [])
+            user_groups[str(group_user.user_id)].append(group_user)
+
+        data = []
+        for user_id, user_records in user_groups.items():
+            # Use the most recently updated record as the main record
+            main_record = max(user_records, key=lambda x: x.updated_at if x.updated_at else x.created_at)
+
+            parse_tag = parse_tag_result.get(user_id, [])
             tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
-            
+
+            # Collect all groups for this user
+            groups_list = []
+            group_ids_list = []
+            for record in user_records:
+                group_name = chat_room.get(record.chat_id, '')
+                if group_name:
+                    groups_list.append({
+                        'chat_id': record.chat_id,
+                        'name': group_name
+                    })
+                    group_ids_list.append(record.chat_id)
+
             # 格式化数据以匹配前端TgUser接口
             user_data = {
-                'id': group_user.id,
-                'user_id': str(group_user.user_id),
-                'username': group_user.username or '',
-                'first_name': group_user.nickname or '',
+                'id': main_record.id,
+                'user_id': user_id,
+                'username': main_record.username or '',
+                'first_name': main_record.nickname or '',
                 'last_name': '',
-                'nickname': group_user.nickname or '',
-                'avatar': group_user.avatar_path or '',
+                'nickname': main_record.nickname or '',
+                'avatar': main_record.avatar_path or '',
                 'phone': '',
-                'bio': group_user.desc or '',
-                'notes': group_user.remark or '',
+                'bio': main_record.desc or '',
+                'notes': main_record.remark or '',
                 'tags': tag_text,
                 'tag_id_list': ','.join(parse_tag) if parse_tag else '',
                 'status': 'active',
-                'last_seen': group_user.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group_user.updated_at else '',
-                'created_at': group_user.created_at.strftime('%Y-%m-%d %H:%M:%S') if group_user.created_at else '',
-                'updated_at': group_user.updated_at.strftime('%Y-%m-%d %H:%M:%S') if group_user.updated_at else '',
-                'chat_id': group_user.chat_id,
-                'group_name': chat_room.get(group_user.chat_id, ''),
+                'last_seen': main_record.updated_at.strftime('%Y-%m-%d %H:%M:%S') if main_record.updated_at else '',
+                'created_at': main_record.created_at.strftime('%Y-%m-%d %H:%M:%S') if main_record.created_at else '',
+                'updated_at': main_record.updated_at.strftime('%Y-%m-%d %H:%M:%S') if main_record.updated_at else '',
+                'chat_id': main_record.chat_id,
+                'group_name': chat_room.get(main_record.chat_id, ''),
+                'groups': groups_list,  # Array of all groups this user is in
+                'group_ids': group_ids_list,  # Array of all group IDs
                 'is_key_focus': True  # 这里所有用户都是重点关注的
             }
             data.append(user_data)

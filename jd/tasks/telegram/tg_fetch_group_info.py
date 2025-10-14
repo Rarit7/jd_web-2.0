@@ -342,11 +342,11 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
     return stats
 
 
-@celery.task
+@celery.task(name='jd.tasks.telegram.tg_fetch_group_info.fetch_all_accounts_group_info', bind=False, queue='jd.celery.telegram')
 def fetch_all_accounts_group_info() -> Dict[str, Any]:
     """
     获取所有成功登录账户的群组信息
-    
+
     Returns:
         Dict[str, Any]: 批量任务执行结果
     """

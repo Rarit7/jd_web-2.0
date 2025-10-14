@@ -5,6 +5,19 @@
     direction="rtl"
     size="400px"
   >
+    <!-- 用户不存在时的空状态 -->
+    <div v-if="userNotFound && !userDetailLoading" class="user-not-found">
+      <el-empty
+        description="该用户可能已经注销或者退群"
+        :image-size="120"
+      >
+        <template #description>
+          <p class="empty-title">该用户可能已经注销或者退群</p>
+          <p class="empty-subtitle" v-if="attemptedUserId">User ID: {{ attemptedUserId }}</p>
+        </template>
+      </el-empty>
+    </div>
+
     <div v-if="currentUserDetail" class="user-detail-drawer" v-loading="userDetailLoading">
       <!-- 用户头像和基本信息 -->
       <div class="user-basic-info">
@@ -382,6 +395,10 @@ const localUserBio = ref('')
 const localUserDetail = ref<UserInfo | null>(null)
 const userDetailLoading = ref(false)
 
+// 用户未找到状态
+const userNotFound = ref(false)
+const attemptedUserId = ref('')
+
 // 变动记录相关数据
 const userChangeRecords = ref<any[]>([])
 const changeRecordsLoading = ref(false)
@@ -398,10 +415,14 @@ const currentUserDetail = computed(() => {
 })
 
 // 监听props变化，加载用户数据
-watch([() => props.userDetail, () => props.userId, () => props.visible], 
+watch([() => props.userDetail, () => props.userId, () => props.visible],
   async ([newUserDetail, newUserId, visible]) => {
     if (!visible) return
-    
+
+    // 重置状态
+    userNotFound.value = false
+    attemptedUserId.value = ''
+
     if (newUserDetail) {
       // 模式1：已提供完整用户信息
       console.log('使用提供的用户详情:', newUserDetail)
@@ -409,7 +430,7 @@ watch([() => props.userDetail, () => props.userId, () => props.visible],
       localRemark.value = newUserDetail.remark || ''
       localKeyFocus.value = newUserDetail.is_key_focus || false
       localUserBio.value = newUserDetail.bio || ''
-      
+
       // 如果没有bio，尝试加载完整信息
       if (!newUserDetail.bio && newUserDetail.user_id) {
         await loadCompleteUserInfo(newUserDetail.user_id)
@@ -417,6 +438,7 @@ watch([() => props.userDetail, () => props.userId, () => props.visible],
     } else if (newUserId) {
       // 模式2：仅提供user_id，需要加载完整信息
       console.log('仅提供user_id，加载完整信息:', newUserId)
+      attemptedUserId.value = newUserId
       await loadCompleteUserInfo(newUserId)
     } else {
       localUserDetail.value = null
@@ -793,33 +815,38 @@ const loadCompleteUserInfo = async (user_id: string) => {
     if (response.data.err_code === 0) {
       const userData = response.data.payload
       console.log('找到用户数据:', userData)
-      
+
       // 构建标准的UserInfo对象
       const userInfo: UserInfo = {
         id: userData.id,
-        senderName: userData.nickname || userData.first_name || userData.username || '未知',
+        senderName: userData.nickname || userData.first_name || userData.username || `用户${userData.user_id}`,
         nickname: userData.nickname || '',
         username: userData.username || '',
         user_id: userData.user_id,
         avatar: userData.avatar ? `/static/${userData.avatar}` : '',
         is_key_focus: userData.is_key_focus || false,
         bio: userData.bio || '',
-        remark: userData.notes || '',
-        chat_id: userData.chat_id
+        remark: userData.notes || ''
       }
-      
+
       // 更新本地状态
       localUserDetail.value = userInfo
-      localUserBio.value = userInfo.bio
-      localRemark.value = userInfo.remark
-      localKeyFocus.value = userInfo.is_key_focus
-      
+      localUserBio.value = userInfo.bio || ''
+      localRemark.value = userInfo.remark || ''
+      localKeyFocus.value = userInfo.is_key_focus || false
+
       console.log(`✅ 成功获取用户 ${user_id} 的完整信息`)
     } else {
       console.log(`❌ 未找到用户 ${user_id}:`, response.data.err_msg)
+      // 设置用户未找到状态
+      userNotFound.value = true
+      localUserDetail.value = null
     }
   } catch (error) {
     console.error('加载用户完整信息失败:', error)
+    // 网络错误等情况也标记为未找到
+    userNotFound.value = true
+    localUserDetail.value = null
   } finally {
     userDetailLoading.value = false
   }
@@ -842,6 +869,29 @@ const navigateToUserMessages = (group: UserGroup) => {
 </script>
 
 <style scoped>
+/* 用户未找到空状态样式 */
+.user-not-found {
+  padding: 60px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.empty-title {
+  font-size: 16px;
+  color: #606266;
+  margin: 16px 0 8px 0;
+  font-weight: 500;
+}
+
+.empty-subtitle {
+  font-size: 13px;
+  color: #909399;
+  margin: 0;
+  font-family: monospace;
+}
+
 /* 用户详情抽屉样式 */
 .user-detail-drawer {
   padding: 20px;

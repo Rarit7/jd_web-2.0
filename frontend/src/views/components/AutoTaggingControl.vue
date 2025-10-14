@@ -5,7 +5,7 @@
         <!-- 统计概览 -->
         <div class="stats-overview">
           <el-row :gutter="16">
-            <el-col :span="6">
+            <el-col :span="8">
               <el-statistic
                 title="总标签记录"
                 :value="stats.summary.total_logs"
@@ -16,7 +16,7 @@
                 </template>
               </el-statistic>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="8">
               <el-statistic
                 title="标记用户数"
                 :value="stats.summary.unique_users"
@@ -27,7 +27,7 @@
                 </template>
               </el-statistic>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="8">
               <el-statistic
                 title="活跃标签数"
                 :value="stats.summary.unique_tags"
@@ -35,17 +35,6 @@
               >
                 <template #suffix>
                   <el-icon><Files /></el-icon>
-                </template>
-              </el-statistic>
-            </el-col>
-            <el-col :span="6">
-              <el-statistic
-                title="运行任务数"
-                :value="runningTasks.length"
-                :precision="0"
-              >
-                <template #suffix>
-                  <el-icon><Loading /></el-icon>
                 </template>
               </el-statistic>
             </el-col>
@@ -89,6 +78,37 @@
         <!-- 统计图表 -->
         <div class="stats-charts">
           <el-row :gutter="16">
+            <!-- 标签统计 -->
+            <el-col :span="8">
+              <div class="chart-card chart-card-scroll">
+                <h4>标签统计 TOP 10</h4>
+                <div v-if="stats.tag_stats.length > 0" class="tag-stats-list">
+                  <div
+                    v-for="(item, index) in stats.tag_stats"
+                    :key="item.tag_id"
+                    class="tag-stat-item"
+                  >
+                    <div class="tag-stat-header">
+                      <span class="tag-rank-badge" :class="'rank-' + (index + 1)">{{ index + 1 }}</span>
+                      <el-tag
+                        :color="item.tag_color"
+                        effect="dark"
+                        size="small"
+                        style="color: white; border: none;"
+                      >
+                        {{ item.tag_name }}
+                      </el-tag>
+                    </div>
+                    <div class="tag-stat-info">
+                      <span class="tag-stat-label">用户数</span>
+                      <span class="tag-stat-value">{{ item.user_count }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="no-data">暂无数据</div>
+              </div>
+            </el-col>
+
             <!-- 来源统计 -->
             <el-col :span="8">
               <div class="chart-card">
@@ -108,8 +128,8 @@
             </el-col>
 
             <!-- 热门关键词 -->
-            <el-col :span="16">
-              <div class="chart-card">
+            <el-col :span="8">
+              <div class="chart-card chart-card-scroll">
                 <h4>热门关键词 TOP 10</h4>
                 <div v-if="stats.keyword_stats.length > 0" class="keyword-stats">
                   <div
@@ -364,7 +384,13 @@ onMounted(() => {
   padding: 20px;
   border: 1px solid #e4e7ed;
   border-radius: 8px;
-  height: 250px;
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-card-scroll {
+  overflow: hidden;
 }
 
 .chart-card h4 {
@@ -377,7 +403,8 @@ onMounted(() => {
 .source-stats {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
+  flex: 1;
 }
 
 .stat-item {
@@ -402,15 +429,15 @@ onMounted(() => {
 .keyword-stats {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 180px;
+  gap: 6px;
+  flex: 1;
   overflow-y: auto;
 }
 
 .keyword-item {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
+  padding: 8px 12px;
   background: #f5f7fa;
   border-radius: 4px;
   font-size: 13px;
@@ -447,5 +474,83 @@ onMounted(() => {
   height: 100px;
   color: #909399;
   font-size: 14px;
+}
+
+.tag-stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tag-stat-item {
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.3s;
+}
+
+.tag-stat-item:hover {
+  background: #ecf5ff;
+  transform: translateX(2px);
+}
+
+.tag-stat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tag-rank-badge.rank-1 {
+  background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+  color: #8b4513;
+}
+
+.tag-rank-badge.rank-2 {
+  background: linear-gradient(135deg, #c0c0c0 0%, #e8e8e8 100%);
+  color: #5a5a5a;
+}
+
+.tag-rank-badge.rank-3 {
+  background: linear-gradient(135deg, #cd7f32 0%, #e6a85c 100%);
+  color: #4a2c0f;
+}
+
+.tag-rank-badge:not(.rank-1):not(.rank-2):not(.rank-3) {
+  background: #e4e7ed;
+  color: #606266;
+}
+
+.tag-stat-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tag-stat-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.tag-stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #409eff;
 }
 </style>

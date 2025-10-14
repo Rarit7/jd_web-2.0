@@ -372,10 +372,15 @@ class TgUserInfoProcessor:
         ]
         
         for db_field, data_field, change_type in field_mappings:
+            # 如果 data_field 不在 new_data 中，跳过此字段（意味着调用者不想更新此字段）
+            if data_field not in new_data:
+                continue
+
             old_value = self._safe_str(getattr(existing_user, db_field, ''))
             new_value = self._safe_str(new_data.get(data_field, ''))
-            
-            if old_value != new_value and new_value:  # 只有新值不为空时才更新
+
+            # 检查是否有变化（包括变为空值的情况）
+            if old_value != new_value:
                 # 记录变化
                 self._record_user_info_change(
                     user_id=user_id,
@@ -383,11 +388,11 @@ class TgUserInfoProcessor:
                     old_value=old_value,
                     new_value=new_value
                 )
-                
+
                 # 更新数据库字段
                 setattr(existing_user, db_field, new_value)
                 changes_count += 1
-                
+
                 logger.info(f"用户信息变化 {user_id}: {db_field} '{old_value}' -> '{new_value}'")
         
         # 更新时间戳
@@ -478,10 +483,10 @@ class TgUserInfoProcessor:
             logger.error(f'记录用户信息变化失败: {e}')
 
     async def save_user_info_from_message_batch(self, batch_messages: list, chat_id: int) -> None:
-        """批量处理消息中的用户信息，优化版本"""
+        """批量处理消息中的用户信息，优化版本，支持头像下载"""
         if not batch_messages:
             return
-            
+
         try:
             # 提取所有用户信息，去重
             user_data_map = {}
@@ -492,7 +497,8 @@ class TgUserInfoProcessor:
                     user_data_map[user_id] = {
                         'nickname': data.get("nick_name", ""),
                         'username': data.get("user_name", ""),
-                        'user_id': user_id
+                        'user_id': user_id,
+                        'sender_entity': data.get("sender_entity")  # 保存sender实体用于头像下载
                     }
             
             if not user_data_map:
@@ -506,31 +512,94 @@ class TgUserInfoProcessor:
             
             existing_user_map = {user.user_id: user for user in existing_users}
             
-            # 批量创建新用户对象
+            # 批量创建新用户对象和下载头像
             new_users = []
             for user_id, user_data in user_data_map.items():
                 if user_id not in existing_user_map:
+                    # 尝试下载头像
+                    avatar_path = ''
+                    sender_entity = user_data.get('sender_entity')
+                    if sender_entity and hasattr(sender_entity, 'photo') and sender_entity.photo:
+                        try:
+                            avatar_dir = os.path.join(app.static_folder, 'images/avatar')
+                            os.makedirs(avatar_dir, exist_ok=True)
+
+                            file_name = f'{user_id}.jpg'
+                            file_full_path = f'{avatar_dir}/{file_name}'
+
+                            # 下载头像到本地
+                            if not os.path.exists(file_full_path):
+                                await self.tg.client.download_profile_photo(sender_entity, file_full_path)
+                                logger.debug(f'批量下载用户 {user_id} 头像成功: {file_name}')
+
+                            avatar_path = f'images/avatar/{file_name}'
+                        except Exception as e:
+                            logger.warning(f'批量下载用户 {user_id} 头像失败: {e}')
+
                     user_obj = TgGroupUserInfo(
                         chat_id=str(chat_id),
                         user_id=user_id,
                         nickname=self._safe_str(user_data['nickname']),
                         username=self._safe_str(user_data['username']),
                         desc='',
-                        avatar_path='',
+                        avatar_path=avatar_path,  # 使用下载的头像路径
                         photo=''
                     )
                     new_users.append(user_obj)
                     # 更新缓存
                     self._user_cache[user_id] = user_obj
                 else:
-                    # 更新现有用户的基本信息（昵称和用户名）
+                    # 更新现有用户的基本信息
                     existing_user = existing_user_map[user_id]
+
+                    # 准备更新数据，默认不改变已有的 desc
                     new_data = {
                         'nickname': user_data['nickname'],
-                        'username': user_data['username'],
-                        'desc': '',
-                        'avatar_path': ''
+                        'username': user_data['username']
                     }
+
+                    # 检查并下载头像（基于photo_id判断是否变更）
+                    sender_entity = user_data.get('sender_entity')
+                    if sender_entity and hasattr(sender_entity, 'photo') and sender_entity.photo:
+                        try:
+                            # 获取photo_id作为文件名
+                            photo_id = str(sender_entity.photo.photo_id)
+                            avatar_dir = os.path.join(app.static_folder, 'images/avatar')
+                            os.makedirs(avatar_dir, exist_ok=True)
+
+                            file_name = f'{photo_id}.jpg'
+                            file_full_path = f'{avatar_dir}/{file_name}'
+                            target_avatar_path = f'images/avatar/{file_name}'
+
+                            # 检查是否需要下载
+                            need_download = False
+                            if not existing_user.avatar_path or existing_user.avatar_path == '':
+                                # 用户没有头像，需要下载
+                                need_download = True
+                                logger.debug(f'用户 {user_id} 缺失头像，准备下载')
+                            elif existing_user.avatar_path != target_avatar_path:
+                                # 头像路径（photo_id）变了，说明用户更换了头像
+                                need_download = True
+                                logger.info(f'用户 {user_id} 头像已变更: {existing_user.avatar_path} -> {target_avatar_path}')
+
+                            # 只在需要时下载
+                            if need_download:
+                                if not os.path.exists(file_full_path):
+                                    await self.tg.client.download_profile_photo(sender_entity, file_full_path)
+                                    logger.debug(f'下载用户 {user_id} 头像成功: {file_name}')
+
+                                # 将新的头像路径添加到更新数据中
+                                new_data['avatar_path'] = target_avatar_path
+
+                        except Exception as e:
+                            logger.warning(f'处理用户 {user_id} 头像失败: {e}')
+                    elif not sender_entity or not hasattr(sender_entity, 'photo') or not sender_entity.photo:
+                        # 用户删除了头像，设置为空
+                        if existing_user.avatar_path and existing_user.avatar_path != '':
+                            new_data['avatar_path'] = ''
+                            logger.info(f'用户 {user_id} 已删除头像')
+
+                    # 调用更新方法，会正确记录所有字段的变更（包括头像）
                     self._update_existing_user(existing_user, new_data)
             
             # 批量添加新用户

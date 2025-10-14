@@ -2,26 +2,54 @@
   <div class="auto-tagging-logs">
     <!-- 过滤器 -->
     <div class="filters">
-      <el-select
-        v-model="filters.tag_id"
-        placeholder="选择标签"
-        clearable
-        @change="fetchData"
-        style="width: 300px;"
-      >
-        <el-option
-          v-for="tag in tags"
-          :key="tag.id"
-          :label="tag.name"
-          :value="tag.id"
+      <div class="filter-row">
+        <el-select
+          v-model="filters.tag_id"
+          placeholder="选择标签"
+          clearable
+          @change="handleTagChange"
+          style="width: 300px;"
         >
-          <div style="display: flex; align-items: center;">
-            <el-tag :color="tag.color" effect="dark" size="small" style="margin-right: 8px; color: white; border: none;">
-              {{ tag.name }}
-            </el-tag>
-          </div>
-        </el-option>
-      </el-select>
+          <el-option
+            v-for="tag in tags"
+            :key="tag.id"
+            :label="tag.name"
+            :value="tag.id"
+          >
+            <div style="display: flex; align-items: center;">
+              <el-tag :color="tag.color" effect="dark" size="small" style="margin-right: 8px; color: white; border: none;">
+                {{ tag.name }}
+              </el-tag>
+            </div>
+          </el-option>
+        </el-select>
+
+        <el-select
+          v-model="filters.keywords"
+          placeholder="选择关键词"
+          multiple
+          clearable
+          filterable
+          :disabled="!filters.tag_id"
+          :loading="keywordsLoading"
+          @change="fetchData"
+          style="width: 400px; margin-left: 12px;"
+        >
+          <template #prefix>
+            <span v-if="filters.keywords && filters.keywords.length > 0" style="font-size: 12px; color: #909399;">
+              已选 {{ filters.keywords.length }} 个
+            </span>
+          </template>
+          <el-option
+            v-for="keyword in availableKeywords"
+            :key="keyword.id"
+            :label="keyword.keyword"
+            :value="keyword.keyword"
+          >
+            <span>{{ keyword.keyword }}</span>
+          </el-option>
+        </el-select>
+      </div>
     </div>
 
     <!-- 日志表格 -->
@@ -253,9 +281,14 @@ const selectedLog = ref<AutoTagLog>()
 const showUserDrawer = ref(false)
 const selectedUserId = ref<string>()
 
+// 关键词相关
+const keywordsLoading = ref(false)
+const availableKeywords = ref<Array<{ id: number; keyword: string }>>([])
+
 // 过滤器
 const filters = reactive({
-  tag_id: undefined as number | undefined
+  tag_id: undefined as number | undefined,
+  keywords: [] as string[]
 })
 
 // 获取标签列表
@@ -270,14 +303,54 @@ const fetchTags = async () => {
   }
 }
 
+// 获取指定标签的所有关键词
+const fetchKeywords = async (tagId: number) => {
+  keywordsLoading.value = true
+  try {
+    const response = await tagsApi.getAllTagKeywords(tagId)
+    if (response.err_code === 0) {
+      availableKeywords.value = response.payload.data
+    } else {
+      ElMessage.error(response.err_msg || '获取关键词失败')
+      availableKeywords.value = []
+    }
+  } catch (error) {
+    console.error('获取关键词失败:', error)
+    ElMessage.error('获取关键词失败')
+    availableKeywords.value = []
+  } finally {
+    keywordsLoading.value = false
+  }
+}
+
+// 处理标签变更
+const handleTagChange = (tagId: number | undefined) => {
+  // 清空关键词选择
+  filters.keywords = []
+  availableKeywords.value = []
+
+  // 如果选择了标签，获取该标签的关键词
+  if (tagId) {
+    fetchKeywords(tagId)
+  }
+
+  // 刷新数据
+  fetchData()
+}
+
 // 获取日志数据
 const fetchData = async () => {
   loading.value = true
   try {
-    const params = {
+    const params: any = {
       page: currentPage.value,
       page_size: pageSize.value,
-      ...filters
+      tag_id: filters.tag_id
+    }
+
+    // 如果选择了关键词，将数组转换为逗号分隔的字符串
+    if (filters.keywords && filters.keywords.length > 0) {
+      params.keywords = filters.keywords.join(',')
     }
 
     // 清理空值
@@ -478,6 +551,13 @@ onMounted(() => {
   padding: 16px;
   background: #f5f7fa;
   border-radius: 8px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .table-container {

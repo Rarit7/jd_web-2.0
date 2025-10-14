@@ -79,6 +79,8 @@ export interface AutoTagStats {
   }
   tag_stats: Array<{
     tag_id: number
+    tag_name: string
+    tag_color: string
     tag_count: number
     user_count: number
   }>
@@ -145,6 +147,12 @@ class TagsApi {
   // 获取标签的关键词列表
   async getKeywordMappings(tagId: number, params?: { page?: number; page_size?: number; is_active?: boolean }): Promise<ApiResponse> {
     const response = await request.get(`/tag/tag-keywords/${tagId}`, { params })
+    return response.data
+  }
+
+  // 获取标签的所有活跃关键词（无分页）
+  async getAllTagKeywords(tagId: number): Promise<ApiResponse> {
+    const response = await request.get(`/tag/tag-keywords/${tagId}/all`)
     return response.data
   }
 

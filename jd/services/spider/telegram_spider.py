@@ -789,6 +789,8 @@ class TelegramAPIs(object):
                 # 使用公共方法解析发送者信息
                 sender_info = self._parse_message_sender(message)
                 m.update(sender_info)
+                # 添加 sender 实体对象，用于头像下载
+                m["sender_entity"] = message.sender if hasattr(message, 'sender') else None
                 if message.is_reply:
                     m["reply_to_msg_id"] = message.reply_to_msg_id
                 if message.forward:

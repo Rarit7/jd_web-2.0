@@ -159,16 +159,19 @@
                 </template>
               </el-table-column>
               
-              <el-table-column prop="group_name" label="群组" width="120" show-overflow-tooltip>
+              <el-table-column prop="group_name" label="群组" min-width="180" show-overflow-tooltip>
                 <template #default="{ row }">
-                  <span 
-                    v-if="row.group_name"
-                    class="group-link"
-                    @click.stop="navigateToChatHistory(row, $event)"
-                    :title="'点击查看此用户在「' + row.group_name + '」的聊天记录'"
-                  >
-                    {{ row.group_name }}
-                  </span>
+                  <div v-if="row.groups && row.groups.length > 0" class="groups-cell">
+                    <span
+                      v-for="(group, index) in row.groups"
+                      :key="group.chat_id"
+                      class="group-link"
+                      @click.stop="navigateToGroupChatHistory(row, group, $event)"
+                      :title="'点击查看此用户在「' + group.name + '」的聊天记录'"
+                    >
+                      {{ group.name }}<span v-if="index < row.groups.length - 1">, </span>
+                    </span>
+                  </div>
                   <span v-else>-</span>
                 </template>
               </el-table-column>
@@ -743,7 +746,32 @@ const formatLastActiveTime = (dateTime: string): string => {
   }
 }
 
-// 跳转到聊天历史页面
+// 跳转到聊天历史页面 - 用于特定群组
+const navigateToGroupChatHistory = (user: TgUser, group: { chat_id: string; name: string }, event?: Event) => {
+  console.log('=== Group Link Click Debug ===')
+  console.log('Event:', event)
+  console.log('Navigation triggered for user:', user.user_id, 'in group:', group.name)
+
+  if (!group.chat_id || !user.user_id) {
+    console.log('Missing data - chat_id:', group.chat_id, 'user_id:', user.user_id)
+    ElMessage.warning('缺少必要的群组或用户信息')
+    return
+  }
+
+  console.log('Navigating with group_id:', group.chat_id, 'user_id:', user.user_id)
+
+  // 构建路由参数
+  router.push({
+    path: '/chat-history',
+    query: {
+      group_id: group.chat_id,
+      user_id: user.user_id,
+      search_type: 'user_id'
+    }
+  })
+}
+
+// 跳转到聊天历史页面 - 旧方法保留以防兼容性问题
 const navigateToChatHistory = (user: TgUser, event?: Event) => {
   console.log('=== Group Link Click Debug ===')
   console.log('Event:', event)
@@ -752,18 +780,18 @@ const navigateToChatHistory = (user: TgUser, event?: Event) => {
   console.log('User chat_id type:', typeof user.chat_id, 'value:', user.chat_id)
   console.log('User user_id type:', typeof user.user_id, 'value:', user.user_id)
   console.log('User group_name:', user.group_name)
-  
+
   // 如果没有chat_id，尝试使用其他字段
   const groupId = user.chat_id || user.id?.toString()
-  
+
   if (!groupId || !user.user_id) {
     console.log('Missing data - chat_id/groupId:', groupId, 'user_id:', user.user_id)
     ElMessage.warning('缺少必要的群组或用户信息')
     return
   }
-  
+
   console.log('Navigating with group_id:', groupId, 'user_id:', user.user_id)
-  
+
   // 构建路由参数
   router.push({
     path: '/chat-history',
@@ -1117,12 +1145,20 @@ onUnmounted(() => {
   gap: 4px;
 }
 
+.groups-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  line-height: 1.6;
+}
+
 .group-link {
   color: #1890ff !important;
   cursor: pointer;
   transition: all 0.3s ease;
   text-decoration: underline;
-  
+  white-space: nowrap;
+
   &:hover {
     color: #40a9ff !important;
   }

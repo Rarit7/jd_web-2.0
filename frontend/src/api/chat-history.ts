@@ -79,6 +79,38 @@ export interface UserChatHistoryResponse {
   }
 }
 
+// 私聊记录查询参数接口
+export interface PrivateChatHistoryParams {
+  page?: number
+  page_size?: number
+  owner_user_id?: string       // Telegram业务ID (string)
+  owner_session_name?: string  // Session名称 (string)
+  peer_user_id?: string
+  search_content?: string
+  start_date?: string
+  end_date?: string
+}
+
+// 私聊对话信息接口
+export interface PrivateChatConversation {
+  peer_user_id: string
+  peer_nickname: string
+  peer_username: string
+  peer_avatar: string
+  message_count: number
+  last_message_time: string
+}
+
+// 私聊对话列表响应接口
+export interface PrivateChatConversationsResponse {
+  err_code: number
+  err_msg: string
+  payload: {
+    conversations: PrivateChatConversation[]
+    total: number
+  }
+}
+
 export const chatHistoryApi = {
   // 获取聊天记录列表
   getList: (params: ChatHistoryParams = {}) => {
@@ -159,5 +191,23 @@ export const chatHistoryApi = {
   // 获取用户统计数据
   getUserStats: (userId: string) => {
     return request.get(`/tg/user/stats/${userId}`)
+  },
+
+  // 获取私人聊天记录（按user_id筛选）
+  getPrivateChatHistory: (params: PrivateChatHistoryParams = {}) => {
+    const defaultParams = {
+      page: 1,
+      page_size: 20,
+      ...params
+    }
+
+    return request.get<ChatHistoryResponse>('/tg/private_chat/history/json', {
+      params: defaultParams
+    })
+  },
+
+  // 获取指定用户的私聊对话列表
+  getPrivateChatConversations: (ownerUserId: string) => {
+    return request.get<PrivateChatConversationsResponse>(`/tg/private_chat/by_user/${ownerUserId}`)
   }
 }

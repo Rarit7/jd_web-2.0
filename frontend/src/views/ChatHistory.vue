@@ -3,15 +3,23 @@
     <!-- 顶部工具栏 -->
     <div class="chat-toolbar">
       <div class="toolbar-left">
-        <div class="search-boxes">
-          <el-input
-            v-model="contentSearchText"
-            placeholder="搜索聊天记录..."
-            :prefix-icon="Search"
-            clearable
-            @input="handleContentSearch"
-            class="search-input-content"
+        <!-- 账户主体筛选 -->
+        <el-select
+          v-model="selectedAccountId"
+          placeholder="选择账户主体"
+          clearable
+          @change="handleAccountChange"
+          class="account-selector"
+        >
+          <el-option
+            v-for="account in accountList"
+            :key="account.id"
+            :label="getAccountDisplayName(account)"
+            :value="account.id"
           />
+        </el-select>
+
+        <div class="search-boxes">
           <el-input
             v-model="userIdSearchText"
             placeholder="搜索用户ID..."
@@ -22,8 +30,8 @@
             class="search-input-userid"
           >
             <template #append>
-              <el-button 
-                :icon="Search" 
+              <el-button
+                :icon="Search"
                 @click="handleUserIdSearch"
                 :loading="userIdSearchLoading"
               />
@@ -40,12 +48,12 @@
             start-placeholder="开始日期"
             end-placeholder="结束日期"
             @change="handleDateChange"
+            locale="zh-cn"
           />
         </div>
       </div>
       <div class="toolbar-right">
         <el-button-group>
-          <el-button :icon="Refresh" @click="refreshData">刷新</el-button>
           <el-button :icon="Download" @click="exportMessages">导出</el-button>
         </el-button-group>
       </div>
@@ -70,6 +78,35 @@
           </template>
           
           <div v-loading="loading" class="chat-list">
+            <!-- 私人聊天区域 -->
+            <div v-if="groupedChats.private.length > 0" class="chat-group">
+              <div class="chat-group-header">
+                <el-icon><User /></el-icon>
+                <span>私人聊天 ({{ groupedChats.private.length }})</span>
+              </div>
+              <div
+                v-for="chat in groupedChats.private"
+                :key="chat.id"
+                class="chat-item"
+                :class="{ active: selectedChatId === chat.id }"
+                @click="selectChat(chat.id)"
+              >
+                <div class="chat-avatar">
+                  <el-avatar :size="40" :src="chat.avatar" >
+                    <span>{{ chat.name.charAt(0) }}</span>
+                  </el-avatar>
+                  <div class="chat-type-indicator private"></div>
+                </div>
+                <div class="chat-info">
+                  <div class="chat-name">
+                    <span class="chat-title">{{ chat.title || chat.name }}</span>
+                  </div>
+                  <div class="chat-last-message">{{ chat.lastMessage }}</div>
+                  <div class="chat-time">{{ chat.lastTime }}</div>
+                </div>
+              </div>
+            </div>
+
             <!-- 群组聊天区域 -->
             <div v-if="groupedChats.group.length > 0" class="chat-group">
               <div class="chat-group-header">
@@ -437,29 +474,26 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
-import { Search, User, Document, Refresh, Download, Picture, PictureRounded, ChatDotSquare, ChatLineSquare, ChatRound, Loading, Film, Microphone, FolderOpened, Cpu, Paperclip } from '@element-plus/icons-vue'
+import { Search, User, Document, Download, Picture, ChatLineSquare, ChatRound, Loading, Film, Microphone, FolderOpened, Cpu, Paperclip } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { tgGroupsApi, type TgGroup } from '@/api/tg-groups'
-import { chatHistoryApi, type ChatMessage, type UserChatHistoryResponse } from '@/api/chat-history'
+import { chatHistoryApi, type ChatMessage } from '@/api/chat-history'
+import { getTgAccountList, type TgAccount } from '@/api/tg-accounts'
 import { useRoute } from 'vue-router'
-import { formatTime, formatDateForApi, formatUTCToLocal } from '@/utils/date'
+import { formatTime, formatDateForApi } from '@/utils/date'
 import UserDetailDrawer from '@/components/UserDetailDrawer.vue'
 import {
   buildAvatarUrl,
   buildImageUrl,
   hasTextContent,
-  isImageFile,
   getFileType,
   formatFileSize,
-  getImageDocumentsFromLegacy,
   getImageDocuments,
-  getNonImageDocumentsFromLegacy,
   getNonImageDocuments,
   hasImageContent,
   hasFileContent,
   determineMainMessageType,
   getFileName,
-  stringHashCode,
   highlightKeyword,
   formatSearchTime,
   type DocumentInfo
@@ -554,6 +588,13 @@ const contentSearchText = ref('')
 const userIdSearchText = ref('')
 const userIdSearchLoading = ref(false)
 
+// 新增：账户状态
+const selectedAccountId = ref<number | ''>('')
+const accountList = ref<TgAccount[]>([])
+
+// 私聊列表状态
+const privateChatList = ref<Chat[]>([])
+
 // 导出对话框相关
 const showExportDialog = ref(false)
 const exportLoading = ref(false)
@@ -570,11 +611,294 @@ const exportRules = {
   ]
 }
 
+// 加载账户列表
+const loadAccountList = async () => {
+  try {
+    const response = await getTgAccountList()
+    if (response.err_code === 0) {
+      // 只获取已登录的账户
+      accountList.value = Array.isArray(response.payload)
+        ? response.payload.filter(account => account.status === 1)
+        : []
+    }
+  } catch (error) {
+    console.error('加载账户列表失败:', error)
+    ElMessage.error('加载账户列表失败')
+  }
+}
+
+// 获取账户显示名称
+const getAccountDisplayName = (account: TgAccount): string => {
+  // 优先显示昵称，其次用户名，最后显示连接名称
+  let displayName = account.nickname || account.username || account.name
+  // 添加手机号作为标识
+  return `${displayName} (${account.phone})`
+}
+
+// 处理账户切换
+const handleAccountChange = async () => {
+  // 重新加载群组列表(按账户筛选)
+  await fetchChatList()
+
+  if (selectedAccountId.value) {
+    // 加载该账户的私聊对话列表
+    await loadPrivateChatConversations()
+  } else {
+    // 清空私聊列表
+    privateChatList.value = []
+  }
+}
+
+// 加载私聊对话列表
+const loadPrivateChatConversations = async () => {
+  if (!selectedAccountId.value) return
+
+  // 找到选中的账户
+  const selectedAccount = accountList.value.find(acc => acc.id === selectedAccountId.value)
+  if (!selectedAccount) {
+    ElMessage.error('未找到选中的账户')
+    return
+  }
+
+  try {
+    const response = await chatHistoryApi.getPrivateChatConversations(selectedAccount.user_id)
+
+    if (response.data.err_code === 0) {
+      const conversations = response.data.payload.conversations
+
+      // 转换为Chat格式
+      privateChatList.value = conversations.map((conv, index) => ({
+        id: parseInt(conv.peer_user_id) || (9000000 + index), // 使用peer_user_id作为数字ID
+        name: conv.peer_nickname || conv.peer_username || `用户${conv.peer_user_id}`,
+        title: conv.peer_nickname || conv.peer_username || `用户${conv.peer_user_id}`,
+        avatar: buildAvatarUrl(conv.peer_avatar || ''),
+        lastMessage: `${conv.message_count}条消息`,
+        lastTime: conv.last_message_time,
+        memberCount: 2,
+        status: 'active',
+        chat_id: String(parseInt(conv.peer_user_id) || (9000000 + index)), // 确保chat_id与id的数字形式一致，但转为字符串
+        desc: '私人聊天',
+        tag: '',
+        remark: '',
+        photo: conv.peer_avatar || '',
+        group_type: 0, // 0表示私人聊天
+        records_count: conv.message_count
+      }))
+    }
+  } catch (error) {
+    console.error('加载私聊对话列表失败:', error)
+    ElMessage.error('加载私聊对话列表失败')
+  }
+}
+
+// 获取私聊消息
+const fetchPrivateChatMessages = async (peerUserId: string) => {
+  messageLoading.value = true
+
+  // 找到选中的账户
+  const selectedAccount = accountList.value.find(acc => acc.id === selectedAccountId.value)
+  if (!selectedAccount) {
+    ElMessage.error('未找到选中的账户')
+    messageLoading.value = false
+    return
+  }
+
+  console.log('[私聊] 正在加载私聊消息:', {
+    owner_user_id: selectedAccount.user_id,
+    owner_session_name: selectedAccount.name,
+    peer_user_id: peerUserId,
+    page: currentPage.value
+  })
+
+  try {
+    const params: any = {
+      page: currentPage.value,
+      page_size: pageSize.value,
+      owner_user_id: selectedAccount.user_id,
+      owner_session_name: selectedAccount.name,
+      peer_user_id: peerUserId
+    }
+
+    if (contentSearchText.value) {
+      params.search_content = contentSearchText.value
+    }
+
+    if (dateRange.value) {
+      params.start_date = formatDateForApi(dateRange.value[0])
+      params.end_date = formatDateForApi(dateRange.value[1])
+    }
+
+    const response = await chatHistoryApi.getPrivateChatHistory(params)
+    console.log('[私聊] API响应:', response.data)
+
+    if (response.data.err_code === 0) {
+      const payload = response.data.payload
+      console.log('[私聊] payload.data:', payload.data)
+      console.log('[私聊] payload.data.length:', payload.data.length)
+      messageList.value = payload.data.map((msg: ChatMessage) => ({
+        id: msg.id,
+        chatId: msg.chat_id,
+        senderName: msg.nickname || msg.username || `用户${msg.user_id}`,
+        nickname: msg.nickname,
+        username: msg.username,
+        user_id: msg.user_id,
+        avatar: buildAvatarUrl(msg.user_avatar || ''),
+        content: determineMainMessageType(msg) === 'image' ? buildImageUrl(msg.photo_paths[0]) : (msg.message || ''),
+        type: determineMainMessageType(msg),
+        fileName: getFileName(msg.document_paths),
+        time: formatTime(msg.postal_time),
+        rawTime: msg.postal_time,
+        isSelf: false,
+        is_key_focus: msg.is_key_focus || false,
+        photo_paths: msg.photo_paths || [],
+        document_paths: msg.document_paths || [],
+        documents: msg.documents || [],
+        reply_to_msg_id: msg.reply_to_msg_id || 0,
+        textContent: hasTextContent(msg) ? msg.message : undefined,
+        images: hasImageContent(msg) ? [
+          ...msg.photo_paths.filter(path => path).map(path => buildImageUrl(path)),
+          ...getImageDocuments(msg).map(doc => buildImageUrl(doc.path))
+        ] : [],
+        files: hasFileContent(msg) ? getNonImageDocuments(msg).map(doc => {
+          const fileType = getFileType(doc)
+          if (doc.is_sticker) {
+            return {
+              name: doc.display_text || '【动画表情】',
+              displayName: doc.display_text || '【动画表情】',
+              isSticker: true,
+              fileType: 'sticker',
+              fileSize: doc.file_size || 0
+            }
+          }
+          const fileName = doc.path ? doc.path.split('/').pop() || doc.path : doc.filename_origin || ''
+          const displayName = doc.filename_origin || fileName
+          let videoThumbnail = ''
+          if (fileType === 'video' && doc.video_thumb_path) {
+            videoThumbnail = buildImageUrl(doc.video_thumb_path)
+          }
+          return {
+            name: fileName,
+            displayName: displayName,
+            isSticker: false,
+            fileType: fileType,
+            fileSize: doc.file_size || 0,
+            videoThumbnail: videoThumbnail
+          }
+        }) : []
+      }))
+      console.log('[私聊] messageList.value.length:', messageList.value.length)
+      console.log('[私聊] messageList.value:', messageList.value)
+      totalMessages.value = payload.total_records
+    }
+  } catch (error) {
+    console.error('加载私聊消息失败:', error)
+    ElMessage.error('加载私聊消息失败')
+  } finally {
+    messageLoading.value = false
+  }
+}
+
+// 加载私聊记录（已废弃，保留兼容性）
+const loadPrivateChatHistory = async () => {
+  messageLoading.value = true
+  try {
+    const params: any = {
+      page: currentPage.value,
+      page_size: pageSize.value
+    }
+
+    // 使用user_id和session_name
+    const selectedAccount = accountList.value.find(acc => acc.id === selectedAccountId.value)
+    if (selectedAccount) {
+      params.owner_user_id = selectedAccount.user_id
+      params.owner_session_name = selectedAccount.name
+    }
+
+    if (contentSearchText.value) {
+      params.search_content = contentSearchText.value
+    }
+
+    if (dateRange.value) {
+      params.start_date = formatDateForApi(dateRange.value[0])
+      params.end_date = formatDateForApi(dateRange.value[1])
+    }
+
+    const response = await chatHistoryApi.getPrivateChatHistory(params)
+
+    if (response.data.err_code === 0) {
+      const payload = response.data.payload
+      messageList.value = payload.data.map((msg: ChatMessage) => ({
+        id: msg.id,
+        chatId: msg.chat_id,
+        senderName: msg.nickname || msg.username || `用户${msg.user_id}`,
+        nickname: msg.nickname,
+        username: msg.username,
+        user_id: msg.user_id,
+        avatar: buildAvatarUrl(msg.user_avatar || ''),
+        content: determineMainMessageType(msg) === 'image' ? buildImageUrl(msg.photo_paths[0]) : (msg.message || ''),
+        type: determineMainMessageType(msg),
+        fileName: getFileName(msg.document_paths),
+        time: formatTime(msg.postal_time),
+        rawTime: msg.postal_time,
+        isSelf: false,
+        is_key_focus: msg.is_key_focus || false,
+        photo_paths: msg.photo_paths || [],
+        document_paths: msg.document_paths || [],
+        documents: msg.documents || [],
+        reply_to_msg_id: msg.reply_to_msg_id || 0,
+        textContent: hasTextContent(msg) ? msg.message : undefined,
+        images: hasImageContent(msg) ? [
+          ...msg.photo_paths.filter(path => path).map(path => buildImageUrl(path)),
+          ...getImageDocuments(msg).map(doc => buildImageUrl(doc.path))
+        ] : [],
+        files: hasFileContent(msg) ? getNonImageDocuments(msg).map(doc => {
+          const fileType = getFileType(doc)
+          if (doc.is_sticker) {
+            return {
+              name: doc.display_text || '【动画表情】',
+              displayName: doc.display_text || '【动画表情】',
+              isSticker: true,
+              fileType: 'sticker',
+              fileSize: doc.file_size || 0
+            }
+          }
+          const fileName = doc.path ? doc.path.split('/').pop() || doc.path : doc.filename_origin || ''
+          const displayName = doc.filename_origin || fileName
+          let videoThumbnail = ''
+          if (fileType === 'video' && doc.video_thumb_path) {
+            videoThumbnail = buildImageUrl(doc.video_thumb_path)
+          }
+          return {
+            name: fileName,
+            displayName: displayName,
+            isSticker: false,
+            fileType: fileType,
+            fileSize: doc.file_size || 0,
+            videoThumbnail: videoThumbnail
+          }
+        }) : []
+      }))
+      totalMessages.value = payload.total_records
+    }
+  } catch (error) {
+    console.error('加载私聊记录失败:', error)
+    ElMessage.error('加载私聊记录失败')
+  } finally {
+    messageLoading.value = false
+  }
+}
+
 // 获取聊天列表（包含群组和私人聊天）
 const fetchChatList = async () => {
   loading.value = true
   try {
-    const response = await tgGroupsApi.getList()
+    // 准备查询参数 - 支持按账户筛选
+    const params: any = {}
+    if (selectedAccountId.value) {
+      params.account_id = String(selectedAccountId.value)  // 转换为字符串
+    }
+
+    const response = await tgGroupsApi.getList(params)
     if (response.data.err_code === 0) {
       // 将TgGroup数据转换为Chat格式
       const groupChats = response.data.payload.data.map((group: TgGroup) => ({
@@ -644,9 +968,23 @@ const fetchChatList = async () => {
 // 获取选中群组的聊天记录
 const fetchMessages = async (chatId: string) => {
   messageLoading.value = true
+
+  // 判断是否是私聊
+  const isPrivateChat = privateChatList.value.some(chat => chat.chat_id === chatId)
+
+  console.log('[fetchMessages] chatId:', chatId, 'isPrivateChat:', isPrivateChat, 'selectedAccountId:', selectedAccountId.value)
+  console.log('[fetchMessages] privateChatList:', privateChatList.value)
+
+  if (isPrivateChat && selectedAccountId.value) {
+    console.log('[fetchMessages] 调用 fetchPrivateChatMessages')
+    // 加载私聊消息
+    await fetchPrivateChatMessages(chatId)
+    return
+  }
+
   try {
     let response: any
-    
+
     // 检查是否是按用户ID搜索
     if (userIdSearchText.value) {
       const userId = userIdSearchText.value.trim()
@@ -675,7 +1013,7 @@ const fetchMessages = async (chatId: string) => {
         messageList.value = payload.data.map((msg: ChatMessage) => ({
           id: msg.id,
           chatId: msg.chat_id,
-          senderName: msg.nickname || msg.username,
+          senderName: msg.nickname || msg.username || `用户${msg.user_id}`,
           nickname: msg.nickname,
           username: msg.username,
           user_id: msg.user_id,
@@ -788,7 +1126,7 @@ const fetchMessages = async (chatId: string) => {
         messageList.value = payload.data.map((msg: ChatMessage) => ({
           id: msg.id,
           chatId: msg.chat_id,
-          senderName: msg.nickname || msg.username,
+          senderName: msg.nickname || msg.username || `用户${msg.user_id}`,
           nickname: msg.nickname,
           username: msg.username,
           user_id: msg.user_id,
@@ -927,17 +1265,36 @@ const fetchMessagesForPage = async (chatId: string, page: number) => {
       }
 
       // 根据聊天类型选择合适的API
-      const selectedChat = chatList.value.find(chat => chat.chat_id === chatId)
-      if (selectedChat && selectedChat.group_type === 0) {
-        // 私人聊天使用专用API
-        response = await chatHistoryApi.getByPrivateChat(chatId, searchParams)
+      let selectedChat = chatList.value.find(chat => chat.chat_id === chatId)
+      if (!selectedChat) {
+        selectedChat = privateChatList.value.find(chat => chat.chat_id === chatId)
+      }
+
+      // 判断是否是私聊
+      const isPrivateChat = privateChatList.value.some(chat => chat.chat_id === chatId)
+
+      if (isPrivateChat && selectedAccountId.value) {
+        // 私聊使用getPrivateChatHistory API
+        const selectedAccount = accountList.value.find(acc => acc.id === selectedAccountId.value)
+        if (selectedAccount) {
+          const privateParams = {
+            ...searchParams,
+            owner_user_id: selectedAccount.user_id,
+            owner_session_name: selectedAccount.name,
+            peer_user_id: chatId
+          }
+          response = await chatHistoryApi.getPrivateChatHistory(privateParams)
+        } else {
+          console.error('未找到选中的账户')
+          return
+        }
       } else {
         // 群组聊天使用原有API
         response = await chatHistoryApi.getByGroupId(chatId, searchParams)
       }
     }
-    
-    if (response.data.err_code === 0) {
+
+    if (response && response.data.err_code === 0) {
       const payload = response.data.payload
       totalMessages.value = payload.total_records
       // 只更新总数，不更新消息列表
@@ -973,7 +1330,7 @@ const filteredChats = computed(() => {
   )
 })
 
-// 新增：按类型分组的聊天列表，过滤掉私人聊天和消息数为0的群组
+// 新增：按类型分组的聊天列表
 const groupedChats = computed(() => {
   const groups = {
     private: [] as Chat[],
@@ -981,8 +1338,12 @@ const groupedChats = computed(() => {
     channel: [] as Chat[]
   }
 
+  // 添加私聊列表
+  groups.private = privateChatList.value
+
+  // 添加群组和频道
   filteredChats.value.forEach(chat => {
-    // 跳过私人聊天（group_type === 0）和消息数为0的群组
+    // 过滤掉消息数为0的群组
     if (chat.records_count > 0) {
       if (chat.group_type === 1) {
         groups.group.push(chat)
@@ -990,14 +1351,19 @@ const groupedChats = computed(() => {
         groups.channel.push(chat)
       }
     }
-    // 移除了 group_type === 0 的处理，不再显示私人聊天
   })
 
   return groups
 })
 
 const selectedChat = computed(() => {
-  return chatList.value.find(chat => chat.id === selectedChatId.value)
+  // 先在群聊列表中查找
+  let chat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  // 如果没找到，在私聊列表中查找
+  if (!chat) {
+    chat = privateChatList.value.find(chat => chat.id === selectedChatId.value)
+  }
+  return chat
 })
 
 const allChats = computed(() => {
@@ -1165,31 +1531,50 @@ const fetchPrivateChats = async (existingGroupChatIds: string[]): Promise<Chat[]
 
 // 方法
 const selectChat = async (chatId: number) => {
+  console.log('[selectChat] 选择聊天, chatId:', chatId)
   selectedChatId.value = chatId
-  
+
   // 清空之前的消息列表
   messageList.value = []
-  
-  // 根据chatId获取对应的chat_id
-  const selectedChat = chatList.value.find(chat => chat.id === chatId)
+
+  // 先在群聊列表中查找
+  let selectedChat = chatList.value.find(chat => chat.id === chatId)
+
+  // 如果没找到，在私聊列表中查找
+  if (!selectedChat) {
+    selectedChat = privateChatList.value.find(chat => chat.id === chatId)
+    console.log('[selectChat] 从私聊列表找到:', selectedChat)
+  } else {
+    console.log('[selectChat] 从群聊列表找到:', selectedChat)
+  }
+
   if (selectedChat) {
+    console.log('[selectChat] selectedChat.chat_id:', selectedChat.chat_id)
     // 先获取第1页数据来计算总页数
     await fetchMessagesForPage(selectedChat.chat_id, 1)
-    
+
     // 计算最后一页并跳转
     const lastPage = Math.ceil(totalMessages.value / pageSize.value)
+    console.log('[selectChat] totalMessages:', totalMessages.value, 'lastPage:', lastPage)
     if (lastPage > 1) {
       currentPage.value = lastPage
       await fetchMessages(selectedChat.chat_id)
     } else {
       currentPage.value = 1
+      // 即使只有1页，也需要调用fetchMessages来加载消息
+      await fetchMessages(selectedChat.chat_id)
     }
+  } else {
+    console.error('[selectChat] 未找到选中的聊天')
   }
 }
 
 const handlePageChange = (page: number) => {
   currentPage.value = page
-  const selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  let selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat) {
+    selectedChat = privateChatList.value.find(chat => chat.id === selectedChatId.value)
+  }
   if (selectedChat) {
     fetchMessages(selectedChat.chat_id)
   }
@@ -1198,7 +1583,10 @@ const handlePageChange = (page: number) => {
 const handleSizeChange = (size: number) => {
   pageSize.value = size
   currentPage.value = 1
-  const selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  let selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat) {
+    selectedChat = privateChatList.value.find(chat => chat.id === selectedChatId.value)
+  }
   if (selectedChat) {
     fetchMessages(selectedChat.chat_id)
   }
@@ -1207,11 +1595,14 @@ const handleSizeChange = (size: number) => {
 // 工具栏方法
 const handleDateChange = async (dates: [Date, Date] | null) => {
   dateRange.value = dates
-  const selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  let selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat) {
+    selectedChat = privateChatList.value.find(chat => chat.id === selectedChatId.value)
+  }
   if (selectedChat) {
     // 重新计算分页
     await fetchMessagesForPage(selectedChat.chat_id, 1)
-    
+
     // 对于用户ID搜索，跳转到第一页；其他情况跳转到最后一页
     if (userIdSearchText.value) {
       currentPage.value = 1
@@ -1219,7 +1610,7 @@ const handleDateChange = async (dates: [Date, Date] | null) => {
       const lastPage = Math.ceil(totalMessages.value / pageSize.value)
       currentPage.value = Math.max(1, lastPage)
     }
-    
+
     await fetchMessages(selectedChat.chat_id)
   }
 }
@@ -1250,7 +1641,10 @@ const refreshData = async () => {
 // 打开导出对话框
 const exportMessages = () => {
   // 设置默认值
-  const selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  let selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+  if (!selectedChat) {
+    selectedChat = privateChatList.value.find(chat => chat.id === selectedChatId.value)
+  }
   if (selectedChat) {
     exportForm.chat_id = selectedChat.chat_id
   }
@@ -1353,7 +1747,7 @@ const handleChatSearch = async () => {
       searchResults.value = payload.data.map((msg: ChatMessage) => ({
         id: msg.id,
         chatId: msg.chat_id,
-        senderName: msg.nickname || msg.username,
+        senderName: msg.nickname || msg.username || `用户${msg.user_id}`,
         nickname: msg.nickname,
         username: msg.username,
         user_id: msg.user_id,
@@ -1630,9 +2024,10 @@ const handleSearchBlur = () => {
 
 // 页面加载时的初始化
 onMounted(() => {
+  loadAccountList()  // 新增：加载账户列表
   fetchChatList()
   loadSearchHistory()
-  
+
   // 处理URL参数
   handleUrlParameters()
 })
@@ -1748,7 +2143,7 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
 .chat-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 20px;
   padding: 16px 20px;
   background: #fff;
   border-radius: 8px;
@@ -1758,10 +2153,19 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
 }
 
 .toolbar-left {
-  flex: 1;
   display: flex;
   align-items: center;
-  max-width: 500px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.account-selector {
+  width: 280px;
+  flex-shrink: 0;
+}
+
+.chat-type-selector {
+  flex-shrink: 0;
 }
 
 .toolbar-center {
@@ -1775,6 +2179,7 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .date-filter,
@@ -1787,13 +2192,12 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
 }
 
 .search-input-content,
 .search-input-userid {
-  flex: 1;
-  min-width: 180px;
+  width: 240px;
+  flex-shrink: 0;
 }
 
 

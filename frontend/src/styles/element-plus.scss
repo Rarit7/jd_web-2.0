@@ -1,0 +1,14 @@
+// Element Plus 按需导入的 JS API 组件样式
+// 这些组件通过 JS 调用（ElMessageBox.confirm 等），需要手动导入样式
+
+// MessageBox 样式
+@import 'element-plus/theme-chalk/el-message-box.css';
+@import 'element-plus/theme-chalk/el-overlay.css';
+@import 'element-plus/theme-chalk/el-button.css';
+@import 'element-plus/theme-chalk/el-icon.css';
+
+// Message 样式（如果使用）
+@import 'element-plus/theme-chalk/el-message.css';
+
+// Notification 样式（如果使用）
+@import 'element-plus/theme-chalk/el-notification.css';

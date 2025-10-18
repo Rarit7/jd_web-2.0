@@ -12,7 +12,7 @@
         <div class="left-panel">
           <div class="tree-header">
             <span>档案目录</span>
-            <el-button type="primary" size="small" text>
+            <el-button type="primary" size="small" text @click="handleAddFolder">
               <el-icon><Plus /></el-icon>
             </el-button>
           </div>
@@ -25,7 +25,7 @@
             @node-click="handleNodeClick"
           >
             <template #default="{ node, data }">
-              <span class="custom-tree-node">
+              <span class="custom-tree-node" @contextmenu.prevent="handleTreeNodeContextMenu($event, node, data)">
                 <el-icon v-if="data.type === 'folder'">
                   <Folder />
                 </el-icon>
@@ -33,6 +33,21 @@
                   <User />
                 </el-icon>
                 <span class="node-label">{{ node.label }}</span>
+                <!-- 档案状态标签 - 已生成状态不显示 -->
+                <el-tag v-if="data.type === 'resource' && data.status && data.status !== 'generated'" :type="getStatusTagType(data.status)" size="small" class="status-badge">
+                  {{ getStatusLabel(data.status) }}
+                </el-tag>
+                <!-- 文件夹操作按钮 -->
+                <div class="node-actions" v-if="data.type === 'folder'" @click.stop>
+                  <el-button-group>
+                    <el-button size="small" text type="primary" @click.stop="openFolderEditor(data)">
+                      <el-icon><Edit /></el-icon>
+                    </el-button>
+                    <el-button size="small" text type="danger" @click.stop="openFolderDeleter(data)">
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </el-button-group>
+                </div>
               </span>
             </template>
           </el-tree>
@@ -42,10 +57,18 @@
         <div class="right-panel">
           <div v-if="selectedNode && selectedNode.type === 'resource'" class="content-display">
             <div class="profile-header">
-              <h2>{{ selectedNode.label }}</h2>
-              <el-button type="primary" size="small">
-                <el-icon><RefreshRight /></el-icon>
-                刷新数据
+              <div class="profile-title-section">
+                <h2>{{ selectedNode.label }}</h2>
+                <el-tag v-if="(selectedNode as any).status" :type="getStatusTagType((selectedNode as any).status)" class="header-status-badge">
+                  <el-icon style="margin-right: 4px;" :class="`status-icon-${(selectedNode as any).status}`">
+                    <component :is="getStatusIcon((selectedNode as any).status)" />
+                  </el-icon>
+                  {{ getStatusLabel((selectedNode as any).status) }}
+                </el-tag>
+              </div>
+              <el-button type="primary" size="small" @click="handleEditProfile">
+                <el-icon><Edit /></el-icon>
+                编辑档案
               </el-button>
             </div>
 
@@ -59,27 +82,28 @@
                   <el-icon><Avatar /></el-icon>
                   <h3>基本信息</h3>
                 </div>
-                <div class="section-content">
+                <div class="section-content" v-loading="userDataLoading">
                   <div class="user-header-compact">
-                    <el-avatar :size="80" src="" class="user-avatar">
+                    <el-avatar :size="80" :src="mockUserData.avatar" class="user-avatar">
                       <el-icon :size="40"><UserFilled /></el-icon>
                     </el-avatar>
                     <div class="user-main-info-compact">
-                      <div class="info-row">
-                        <span class="label">昵称:</span>
-                        <span class="value">{{ mockUserData.nickname || mockUserData.username }}</span>
+                      <!-- 昵称行 - 大字体显示,备注以灰色括号跟随 -->
+                      <div class="nickname-row">
+                        <span class="nickname-text">{{ mockUserData.nickname || mockUserData.username || mockUserData.userId }}</span>
+                        <span v-if="mockUserData.remark" class="remark-text">({{ mockUserData.remark }})</span>
                       </div>
-                      <div class="info-row">
-                        <span class="label">用户名:</span>
-                        <span class="value">@{{ mockUserData.username }}</span>
+                      <!-- 用户名行 -->
+                      <div v-if="mockUserData.username" class="username-row">
+                        <span class="username-text">@{{ mockUserData.username }}</span>
                       </div>
-                      <div class="info-row">
-                        <span class="label">用户ID:</span>
-                        <span class="value">{{ mockUserData.userId }}</span>
+                      <!-- 用户ID行 -->
+                      <div class="userid-row">
+                        <span class="userid-text">{{ mockUserData.userId }}</span>
                       </div>
-                      <div class="info-row">
-                        <span class="label">备注名称:</span>
-                        <span class="value">{{ mockUserData.remark || '暂无' }}</span>
+                      <!-- 个人简介 -->
+                      <div v-if="mockUserData.bio" class="bio-row">
+                        <span class="bio-text">{{ mockUserData.bio }}</span>
                       </div>
                     </div>
                   </div>
@@ -105,6 +129,8 @@
                       v-for="group in mockUserData.groups"
                       :key="group.id"
                       class="group-card"
+                      @click="navigateToGroupMessages(group)"
+                      :title="'点击查看此用户在「' + group.name + '」的聊天记录'"
                     >
                       <div class="group-card-name">{{ group.name }}</div>
                       <div class="group-card-meta">
@@ -122,24 +148,81 @@
                   <el-icon><ChatDotRound /></el-icon>
                   <h3>最近消息</h3>
                 </div>
-                <div class="section-content">
-                  <el-table :data="mockRecentMessages" stripe size="small" style="width: 100%">
-                    <el-table-column prop="groupName" label="群组名" width="120" />
-                    <el-table-column prop="content" label="发言内容" show-overflow-tooltip />
-                    <el-table-column prop="time" label="发言时间" width="150" />
-                    <el-table-column label="操作" width="80" align="center">
-                      <template #default>
-                        <el-button type="primary" text size="small">查看</el-button>
-                      </template>
-                    </el-table-column>
-                  </el-table>
+                <div class="section-content" v-loading="recentMessagesLoading">
+                  <div v-if="mockRecentMessages.length === 0 && !recentMessagesLoading" class="empty-message">
+                    <el-empty description="暂无消息记录" />
+                  </div>
+                  <transition-group v-else name="message-list" tag="div">
+                    <el-table
+                      v-if="mockRecentMessages.length > 0"
+                      key="table"
+                      :data="mockRecentMessages"
+                      stripe
+                      size="small"
+                      style="width: 100%"
+                    >
+                      <el-table-column prop="groupName" label="群组名" width="120" />
+                      <el-table-column prop="content" label="发言内容" show-overflow-tooltip />
+                      <el-table-column prop="time" label="发言时间" width="150" />
+                      <el-table-column label="操作" width="80" align="center">
+                        <template #default>
+                          <el-button type="primary" text size="small">查看</el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </transition-group>
 
                   <!-- 图片展示行 -->
                   <div class="photo-gallery">
-                    <div v-for="i in 10" :key="i" class="photo-placeholder">
+                    <div v-if="mockPhotos.length > 0" class="image-row">
+                      <div
+                        v-for="(photo, index) in mockPhotos"
+                        :key="photo.message_id"
+                        class="image-item-wrapper"
+                      >
+                        <img
+                          :src="`/static/${photo.path}`"
+                          :alt="`Image ${index}`"
+                          class="message-image"
+                          @click="openImagePreview(index)"
+                          @error="handleImageError"
+                        />
+                      </div>
+                    </div>
+                    <div v-else class="photo-empty">
                       <el-icon :size="40"><PictureFilled /></el-icon>
+                      <p>暂无图片</p>
                     </div>
                   </div>
+
+                  <!-- 图片预览对话框 -->
+                  <el-dialog
+                    v-model="imagePreviewVisible"
+                    :show-close="true"
+                    :close-on-click-modal="true"
+                    :close-on-press-escape="true"
+                    @keydown.left="previousImage"
+                    @keydown.right="nextImage"
+                  >
+                    <div class="image-preview-container">
+                      <div v-if="currentImageIndex >= 0 && mockPhotos[currentImageIndex]" class="preview-content">
+                        <img
+                          :src="`/static/${mockPhotos[currentImageIndex].path}`"
+                          class="preview-image"
+                          @error="handleImageError"
+                        />
+                        <div class="preview-nav">
+                          <button @click="previousImage" class="nav-btn" :disabled="currentImageIndex === 0">
+                            <el-icon><ArrowLeft /></el-icon>
+                          </button>
+                          <span class="preview-counter">{{ currentImageIndex + 1 }} / {{ mockPhotos.length }}</span>
+                          <button @click="nextImage" class="nav-btn" :disabled="currentImageIndex === mockPhotos.length - 1">
+                            <el-icon><ArrowRight /></el-icon>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </el-dialog>
                 </div>
               </section>
 
@@ -149,7 +232,7 @@
                   <el-icon><Clock /></el-icon>
                   <h3>信息变动</h3>
                 </div>
-                <div class="section-content">
+                <div class="section-content" v-loading="changeRecordsLoading">
                   <div class="change-records-table">
                     <div
                       v-for="change in mockChanges"
@@ -160,7 +243,40 @@
                         <span class="change-type-badge">{{ change.type }}</span>
                         <span class="change-time-text">{{ change.time }}</span>
                       </div>
-                      <div class="change-values">
+
+                      <!-- 头像变动 - 显示图片 -->
+                      <div v-if="change.changeType === 3" class="change-values avatar-change-values">
+                        <div class="avatar-change-item">
+                          <span class="change-label-text">变动前:</span>
+                          <div v-if="!change.originalValue || change.originalValue === '(空)'" class="empty-avatar-box">
+                            无头像
+                          </div>
+                          <el-avatar
+                            v-else
+                            :size="40"
+                            :src="formatAvatarUrl(change.originalValue)"
+                            shape="square"
+                            class="change-avatar-img"
+                          />
+                        </div>
+                        <el-icon class="arrow-icon"><Right /></el-icon>
+                        <div class="avatar-change-item">
+                          <span class="change-label-text">变动后:</span>
+                          <div v-if="!change.newOriginalValue || change.newOriginalValue === '(空)'" class="empty-avatar-box">
+                            无头像
+                          </div>
+                          <el-avatar
+                            v-else
+                            :size="40"
+                            :src="formatAvatarUrl(change.newOriginalValue)"
+                            shape="square"
+                            class="change-avatar-img"
+                          />
+                        </div>
+                      </div>
+
+                      <!-- 非头像变动 - 显示文字 -->
+                      <div v-else class="change-values">
                         <span class="old-value-text">{{ change.oldValue }}</span>
                         <el-icon class="arrow-icon"><Right /></el-icon>
                         <span class="new-value-text">{{ change.newValue }}</span>
@@ -176,7 +292,7 @@
                   <el-icon><PriceTag /></el-icon>
                   <h3>用户标签</h3>
                 </div>
-                <div class="section-content">
+                <div class="section-content" v-loading="tagsLoading">
                   <el-table :data="mockTags" stripe border>
                     <el-table-column prop="tagName" label="标签名称" width="150">
                       <template #default="{ row }">
@@ -186,7 +302,12 @@
                     <el-table-column prop="keyword" label="触发关键词" width="150" />
                     <el-table-column prop="content" label="详细内容">
                       <template #default="{ row }">
-                        <span v-html="highlightKeyword(row.content, row.keyword)"></span>
+                        <HighlightText
+                          v-if="row.originalText"
+                          :text="row.originalText"
+                          :keywords="row.keyword"
+                        />
+                        <span v-else>{{ row.content }}</span>
                       </template>
                     </el-table-column>
                     <el-table-column prop="createdAt" label="创建时间" width="180" />
@@ -350,18 +471,82 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 编辑档案对话框 -->
+    <el-dialog
+      v-model="editProfileDialogVisible"
+      title="编辑档案"
+      width="500px"
+      @close="resetEditForm"
+    >
+      <el-form
+        ref="editFormRef"
+        :model="editProfileForm"
+        :rules="editProfileRules"
+        label-width="100px"
+      >
+        <el-form-item label="档案标题" prop="profile_name">
+          <el-input
+            v-model="editProfileForm.profile_name"
+            placeholder="请输入档案标题"
+            clearable
+          />
+        </el-form-item>
+
+        <el-form-item label="所属目录" prop="folder_id">
+          <el-tree-select
+            v-model="editProfileForm.folder_id"
+            :data="folderOnlyData"
+            :props="treeSelectorProps"
+            clearable
+            placeholder="选择所属目录（可选）"
+          />
+        </el-form-item>
+
+        <el-form-item label="档案状态" prop="status">
+          <el-select
+            v-model="editProfileForm.status"
+            placeholder="请选择档案状态"
+          >
+            <el-option label="草稿" value="draft" />
+            <el-option label="已生成" value="generated" />
+            <el-option label="已归档" value="archived" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="editProfileDialogVisible = false">取消</el-button>
+          <el-button type="danger" @click="handleDeleteProfile">删除档案</el-button>
+          <el-button type="primary" @click="handleSaveProfile">保存</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 文件夹管理对话框 -->
+    <FolderManager
+      ref="folderManagerRef"
+      :parent-folder-id="selectedParentFolderId"
+      :current-folder-id="selectedFolderId"
+      :current-folder-name="selectedFolderName"
+      :user-id="currentUserId"
+      @success="handleFolderManagerSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, watch, computed, reactive } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/store/modules/user'
 import {
   Folder,
   User,
   FolderOpened,
   Avatar,
   UserFilled,
-  RefreshRight,
   Clock,
   PriceTag,
   PictureFilled,
@@ -370,8 +555,33 @@ import {
   ChatDotRound,
   CirclePlus,
   Right,
-  Plus
+  Plus,
+  ArrowLeft,
+  ArrowRight,
+  Edit,
+  Delete,
+  DocumentCopy,
+  CircleCheck,
+  FolderDelete
 } from '@element-plus/icons-vue'
+import { profileFolderApi, userProfileApi, type FolderTreeNode } from '@/api/user-profile'
+import { tgUsersApi } from '@/api/tg-users'
+import { chatHistoryApi } from '@/api/chat-history'
+import { tagsApi } from '@/api/tags'
+import HighlightText from '@/components/HighlightText.vue'
+import FolderManager from '@/components/UserProfile/FolderManager.vue'
+
+// Router 实例
+const router = useRouter()
+
+// 用户 Store
+const userStore = useUserStore()
+
+// FolderManager 组件 ref
+const folderManagerRef = ref<InstanceType<typeof FolderManager>>()
+
+// 获取当前登录用户ID
+const currentUserId = computed(() => userStore.userInfo?.id || 1)
 
 // 目录树数据结构
 interface TreeNode {
@@ -392,6 +602,7 @@ interface UserInfo {
   userId: string
   username: string
   nickname?: string
+  avatar?: string
   phone?: string
   remark?: string
   bio?: string
@@ -405,8 +616,11 @@ interface UserInfo {
 interface ChangeRecord {
   id: string
   type: string
+  changeType: number  // 1:显示名称 2:用户名 3:头像 4:个人简介
   oldValue: string
   newValue: string
+  originalValue: string  // 用于头像变动前的原始路径
+  newOriginalValue: string  // 用于头像变动后的原始路径
   time: string
 }
 
@@ -414,6 +628,7 @@ interface TagRecord {
   tagName: string
   keyword: string
   content: string
+  originalText?: string  // 原始文本用于高亮
   createdAt: string
 }
 
@@ -431,39 +646,9 @@ interface Comment {
   time: string
 }
 
-// 测试数据 - 包含1级文件夹
-const treeData = ref<TreeNode[]>([
-  {
-    id: '1',
-    label: '商家',
-    type: 'folder',
-    children: [
-      { id: '1-1', label: '商家A', type: 'resource' },
-      { id: '1-2', label: '商家B', type: 'resource' },
-      { id: '1-3', label: '商家C', type: 'resource' }
-    ]
-  },
-  {
-    id: '2',
-    label: '嫌疑人',
-    type: 'folder',
-    children: [
-      { id: '2-1', label: '嫌疑人A', type: 'resource' },
-      { id: '2-2', label: '嫌疑人B', type: 'resource' },
-      { id: '2-3', label: '嫌疑人C', type: 'resource' }
-    ]
-  },
-  {
-    id: '3',
-    label: '买家',
-    type: 'folder',
-    children: [
-      { id: '3-1', label: '买家A', type: 'resource' },
-      { id: '3-2', label: '买家B', type: 'resource' },
-      { id: '3-3', label: '买家C', type: 'resource' }
-    ]
-  }
-])
+// 树形数据（从API加载）
+const treeData = ref<FolderTreeNode[]>([])
+const loading = ref(false)
 
 // 树形组件配置
 const treeProps = {
@@ -474,10 +659,486 @@ const treeProps = {
 // 当前选中的节点
 const selectedNode = ref<TreeNode | null>(null)
 
+// 文件夹管理相关状态
+const selectedParentFolderId = ref<number | null>(null)
+const selectedFolderId = ref<number | undefined>(undefined)
+const selectedFolderName = ref('')
+
 // 节点点击事件
-const handleNodeClick = (data: TreeNode) => {
+const handleNodeClick = (data: FolderTreeNode) => {
   selectedNode.value = data
 }
+
+// 加载文件夹树
+const loadFolderTree = async () => {
+  try {
+    loading.value = true
+    const response = await profileFolderApi.getTree()
+    if ((response.data as any).err_code === 0) {
+      treeData.value = (response.data as any).payload.tree_data
+    } else {
+      ElMessage.error((response.data as any).err_msg || '加载文件夹树失败')
+    }
+  } catch (error: any) {
+    console.error('加载文件夹树失败:', error)
+    ElMessage.error('加载文件夹树失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 点击'+'按钮打开新建文件夹对话框
+const handleAddFolder = () => {
+  selectedParentFolderId.value = null
+  if (folderManagerRef.value) {
+    folderManagerRef.value.openAdd()
+  }
+}
+
+// 打开文件夹编辑对话框
+const openFolderEditor = (data: FolderTreeNode) => {
+  const folderId = parseInt(data.id.replace('folder_', ''))
+  selectedFolderId.value = folderId
+  selectedFolderName.value = data.label
+  if (folderManagerRef.value) {
+    folderManagerRef.value.openEdit(folderId, data.label)
+  }
+}
+
+// 打开文件夹删除对话框
+const openFolderDeleter = (data: FolderTreeNode) => {
+  const folderId = parseInt(data.id.replace('folder_', ''))
+  selectedFolderId.value = folderId
+  selectedFolderName.value = data.label
+  if (folderManagerRef.value) {
+    folderManagerRef.value.openDelete(folderId, data.label)
+  }
+}
+
+// 树节点右键菜单事件
+const handleTreeNodeContextMenu = (_event: MouseEvent, _node: any, data: FolderTreeNode) => {
+  // 可以在这里添加右键菜单功能，暂时保留以供后续扩展
+  console.log('右键点击节点:', data)
+}
+
+// 文件夹管理成功回调
+const handleFolderManagerSuccess = async () => {
+  // 重新加载文件夹树
+  await loadFolderTree()
+  // 清空相关状态
+  selectedParentFolderId.value = null
+  selectedFolderId.value = undefined
+  selectedFolderName.value = ''
+}
+
+// ==================== 编辑档案相关 ====================
+
+interface EditProfileForm {
+  profile_name: string
+  folder_id: number | null
+  status: 'draft' | 'generated' | 'archived'
+}
+
+const editProfileDialogVisible = ref(false)
+const editFormRef = ref()
+const editProfileForm = reactive<EditProfileForm>({
+  profile_name: '',
+  folder_id: null,
+  status: 'draft'
+})
+
+const editProfileRules = {
+  profile_name: [
+    { required: true, message: '请输入档案标题', trigger: 'blur' },
+    { min: 1, max: 200, message: '档案标题长度在 1 到 200 个字符之间', trigger: 'blur' }
+  ]
+}
+
+const treeSelectorProps = {
+  children: 'children',
+  label: 'label',
+  value: 'folder_numeric_id'
+}
+
+// 过滤出只包含文件夹的树形数据
+const folderOnlyData = computed(() => {
+  const filterFolders = (nodes: any[]): any[] => {
+    return nodes
+      .filter(node => node.type === 'folder')
+      .map(node => {
+        // 从 "folder_123" 格式中提取数字 ID
+        const numericId = parseInt((node.id as string).replace('folder_', ''))
+        return {
+          ...node,
+          folder_numeric_id: numericId,
+          children: node.children ? filterFolders(node.children) : []
+        }
+      })
+  }
+
+  return filterFolders(treeData.value)
+})
+
+// 打开编辑档案对话框
+const handleEditProfile = () => {
+  if (!selectedNode.value || selectedNode.value.type !== 'resource') {
+    ElMessage.warning('请先选择一个档案')
+    return
+  }
+
+  editProfileForm.profile_name = selectedNode.value.label
+  // 获取档案所属的文件夹ID，默认选中
+  editProfileForm.folder_id = (selectedNode.value as any).folder_id ?? null
+  editProfileForm.status = (selectedNode.value as any).status || 'draft'
+  editProfileDialogVisible.value = true
+}
+
+// 保存档案
+const handleSaveProfile = async () => {
+  if (!editFormRef.value) return
+
+  await editFormRef.value.validate(async (valid: boolean) => {
+    if (valid) {
+      try {
+        if (!selectedNode.value || selectedNode.value.type !== 'resource') return
+
+        const profileId = parseInt((selectedNode.value.id as string).replace('profile_', ''))
+
+        const response = await userProfileApi.update(profileId, {
+          profile_name: editProfileForm.profile_name,
+          status: editProfileForm.status,
+          folder_id: editProfileForm.folder_id
+        })
+
+        if ((response.data as any).err_code === 0) {
+          ElMessage.success('档案保存成功')
+
+          // 更新选中节点的状态，使右侧面板的badge实时更新
+          if (selectedNode.value) {
+            const updatedNode = { ...selectedNode.value }
+            updatedNode.label = editProfileForm.profile_name
+            ;(updatedNode as any).status = editProfileForm.status
+            ;(updatedNode as any).folder_id = editProfileForm.folder_id
+            selectedNode.value = updatedNode
+          }
+
+          editProfileDialogVisible.value = false
+          await loadFolderTree()
+        } else {
+          ElMessage.error((response.data as any).err_msg || '保存档案失败')
+        }
+      } catch (error: any) {
+        console.error('保存档案失败:', error)
+        ElMessage.error('保存档案失败')
+      }
+    }
+  })
+}
+
+// 删除档案
+const handleDeleteProfile = async () => {
+  ElMessageBox.confirm('确认删除此档案吗？删除后不可恢复', '删除确认', {
+    confirmButtonText: '确认删除',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(async () => {
+    try {
+      if (!selectedNode.value || selectedNode.value.type !== 'resource') return
+
+      const profileId = parseInt((selectedNode.value.id as string).replace('profile_', ''))
+
+      const response = await userProfileApi.delete(profileId)
+
+      if ((response.data as any).err_code === 0) {
+        ElMessage.success('档案删除成功')
+        editProfileDialogVisible.value = false
+        selectedNode.value = null
+        await loadFolderTree()
+      } else {
+        ElMessage.error((response.data as any).err_msg || '删除档案失败')
+      }
+    } catch (error: any) {
+      console.error('删除档案失败:', error)
+      ElMessage.error('删除档案失败')
+    }
+  }).catch(() => {
+    // 取消删除
+  })
+}
+
+const resetEditForm = () => {
+  if (editFormRef.value) {
+    editFormRef.value.clearValidate()
+  }
+  editProfileForm.profile_name = ''
+  editProfileForm.folder_id = null
+  editProfileForm.status = 'draft'
+}
+
+// 用户详情加载状态
+const userDataLoading = ref(false)
+
+// 变动记录相关数据
+const changeRecordsLoading = ref(false)
+
+// 标签加载状态
+const tagsLoading = ref(false)
+
+// 加载用户基本信息
+const loadUserBasicInfo = async (user_id: string) => {
+  if (!user_id) return
+
+  userDataLoading.value = true
+  try {
+    // 获取用户详细信息
+    const userResponse = await tgUsersApi.getUserByUserId(user_id)
+    if (userResponse.data.err_code === 0) {
+      const userData = userResponse.data.payload
+
+      // 更新mockUserData的基本信息
+      mockUserData.value.userId = userData.user_id
+      mockUserData.value.username = userData.username || ''
+      mockUserData.value.nickname = userData.nickname || userData.first_name || ''
+      mockUserData.value.remark = userData.notes || ''
+      mockUserData.value.bio = userData.bio || ''
+      mockUserData.value.avatar = userData.avatar ? `/static/${userData.avatar}` : ''
+    }
+
+    // 获取用户统计信息
+    const statsResponse = await chatHistoryApi.getUserStats(user_id)
+    if (statsResponse.data.err_code === 0) {
+      const stats = statsResponse.data.payload
+      mockUserData.value.messageCount = stats.total_messages || 0
+      mockUserData.value.firstMessage = stats.first_message_time || ''
+      mockUserData.value.lastMessage = stats.last_message_time || ''
+
+      // 更新群组列表
+      if (stats.groups && Array.isArray(stats.groups)) {
+        mockUserData.value.groups = stats.groups.map((group: any) => ({
+          id: group.chat_id,
+          name: group.title || group.name,
+          messageCount: group.message_count || 0,
+          lastActiveTime: group.last_active_time || ''
+        }))
+      }
+    }
+  } catch (error) {
+    console.error('加载用户信息失败:', error)
+    ElMessage.error('加载用户信息失败')
+  } finally {
+    userDataLoading.value = false
+  }
+}
+
+// 加载用户变动记录
+const loadUserChangeRecords = async (user_id: string) => {
+  if (!user_id) return
+
+  changeRecordsLoading.value = true
+  try {
+    // 只获取最近几条记录作为预览（API已支持去重）
+    const params = new URLSearchParams({
+      page: '1',
+      size: '5', // 只显示最近5条记录
+      user_id: user_id
+    })
+
+    const response = await fetch(`/api/change_record/user?${params}`)
+    const result = await response.json()
+
+    if (result.err_code === 0) {
+      // 将API数据转换为界面需要的格式
+      mockChanges.value = (result.payload.items || []).map((item: any) => ({
+        id: item.id,
+        type: item.change_type_text,
+        changeType: item.changed_fields,
+        oldValue: formatChangeValue(item.original_value, item.changed_fields),
+        newValue: formatChangeValue(item.new_value, item.changed_fields),
+        originalValue: item.original_value || '',  // 保存变动前的原始路径用于头像显示
+        newOriginalValue: item.new_value || '',  // 保存变动后的原始路径用于头像显示
+        time: item.update_time
+      }))
+    } else {
+      console.error('获取用户变动记录失败:', result.err_msg)
+      mockChanges.value = []
+    }
+  } catch (error) {
+    console.error('加载用户变动记录失败:', error)
+    mockChanges.value = []
+  } finally {
+    changeRecordsLoading.value = false
+  }
+}
+
+// 加载用户标签
+const loadUserTags = async (user_id: string) => {
+  if (!user_id) return
+
+  tagsLoading.value = true
+  try {
+    // 首先获取所有标签列表以构建 tag_id -> tag_name 的映射
+    let tagIdNameMap: Record<number, string> = {}
+    try {
+      const tagListResponse = await tagsApi.getList()
+      if (tagListResponse.err_code === 0 && tagListResponse.payload.data) {
+        tagIdNameMap = tagListResponse.payload.data.reduce((map: Record<number, string>, tag: any) => {
+          map[tag.id] = tag.name
+          return map
+        }, {})
+      }
+    } catch (tagError) {
+      console.warn('加载标签列表失败，将使用tag_id替代:', tagError)
+    }
+
+    const response = await tagsApi.getAutoTagLogs({
+      user_id: user_id,
+      page: 1,
+      page_size: 20
+    })
+
+    if (response.err_code === 0) {
+      const data = response.payload.data || []
+      mockTags.value = data.map((item: any) => {
+        // 根据来源类型提取原始文本
+        let originalText = ''
+        const info = item.detail_info || {}
+
+        switch (item.source_type) {
+          case 'chat':
+            originalText = info.message_text || ''
+            break
+          case 'nickname':
+            originalText = info.nickname || info.new_nickname || info.old_nickname || ''
+            break
+          case 'desc':
+            originalText = info.desc || info.new_desc || info.old_desc || ''
+            break
+          default:
+            originalText = ''
+        }
+
+        return {
+          tagName: tagIdNameMap[item.tag_id] || `标签${item.tag_id}`,  // 使用真实标签名，如果没有则显示标签ID
+          keyword: item.keyword || '',
+          content: item.detail_info?.matched_text || item.detail_info?.message_text || '',
+          originalText: originalText,  // 保存原始文本用于高亮
+          createdAt: item.created_at || ''
+        }
+      })
+    } else {
+      console.error('获取用户标签失败:', response.err_msg)
+      mockTags.value = []
+    }
+  } catch (error) {
+    console.error('加载用户标签失败:', error)
+    mockTags.value = []
+  } finally {
+    tagsLoading.value = false
+  }
+}
+
+// 加载状态标志
+const recentMessagesLoading = ref(false)
+
+// 加载用户最近消息和图片
+const loadUserRecentMessages = async (user_id: string) => {
+  if (!user_id) {
+    console.warn('用户ID为空，跳过加载最近消息')
+    return
+  }
+
+  recentMessagesLoading.value = true
+  console.log(`[加载最近消息] 开始加载用户 ${user_id} 的消息数据...`)
+
+  try {
+    const response = await chatHistoryApi.getUserRecentMessages(user_id)
+    console.log('[加载最近消息] API 响应:', response.data)
+
+    if (response.data.err_code === 0) {
+      const payload = response.data.payload
+      console.log('[加载最近消息] 收到的数据:', {
+        recentMessagesCount: (payload.recent_messages || []).length,
+        recentPhotosCount: (payload.recent_photos || []).length
+      })
+
+      // 更新最近消息
+      mockRecentMessages.value = (payload.recent_messages || []).map((msg: any) => ({
+        groupName: msg.group_name,
+        content: msg.content,
+        time: msg.time
+      }))
+
+      console.log(`[加载最近消息] 已加载 ${mockRecentMessages.value.length} 条消息`)
+
+      // 更新最近图片
+      const photos = (payload.recent_photos || [])
+        .filter((photo: any) => {
+          return photo.type !== 'video_thumbnail' && photo.path
+        })
+        .slice(0, 10)
+        .map((photo: any) => ({
+          path: photo.path,
+          type: photo.type,
+          message_id: photo.message_id
+        }))
+
+      mockPhotos.value = photos
+      console.log(`[加载最近消息] 已加载 ${photos.length} 张图片`)
+    } else {
+      console.error('[加载最近消息] 获取用户最近消息失败:', response.data.err_msg)
+      mockRecentMessages.value = []
+      mockPhotos.value = []
+    }
+  } catch (error) {
+    console.error('[加载最近消息] 加载用户最近消息异常:', error)
+    mockRecentMessages.value = []
+    mockPhotos.value = []
+  } finally {
+    recentMessagesLoading.value = false
+    console.log('[加载最近消息] 加载完成')
+  }
+}
+
+// 格式化变动值
+const formatChangeValue = (value: string, changeType: number): string => {
+  if (!value) return '(空)'
+
+  // 如果是头像变动，显示简化的文件名
+  if (changeType === 3) {
+    if (value.includes('/')) {
+      const parts = value.split('/')
+      return parts[parts.length - 1] || value
+    }
+  }
+
+  return value
+}
+
+// 格式化头像URL
+const formatAvatarUrl = (avatar: string): string => {
+  if (!avatar) return ''
+  if (avatar.startsWith('http')) return avatar
+  return `/static/${avatar}`
+}
+
+// 监听选中节点变化，加载用户数据
+watch(selectedNode, (newNode) => {
+  if (newNode && newNode.type === 'resource') {
+    // 从节点ID中提取tg_user_id (格式: profile_123)
+    const tgUserId = (newNode as any).tg_user_id
+    if (tgUserId) {
+      loadUserBasicInfo(tgUserId)
+      loadUserChangeRecords(tgUserId)
+      loadUserTags(tgUserId)
+      loadUserRecentMessages(tgUserId)
+    }
+  }
+})
+
+// 组件挂载时加载数据
+onMounted(() => {
+  loadFolderTree()
+})
 
 // 占位符数据 - 面板1: 基本信息
 const mockUserData = ref<UserInfo>({
@@ -500,55 +1161,70 @@ const mockUserData = ref<UserInfo>({
   ]
 })
 
-// 占位符数据 - 最近消息
-const mockRecentMessages = ref([
-  { groupName: '化工交流群', content: '请问这批聚乙烯的价格是多少?', time: '2025-01-14 16:30' },
-  { groupName: '产品采购群', content: '我们需要采购一批乙酸乙酯，有货源的联系', time: '2025-01-14 15:45' },
-  { groupName: '化工交流群', content: '最近原料价格波动比较大，大家注意控制成本', time: '2025-01-14 14:20' },
-  { groupName: '行业资讯', content: '分享一篇关于化工行业的最新政策解读', time: '2025-01-14 09:15' },
-  { groupName: '技术讨论组', content: '这个工艺流程有没有优化空间?', time: '2025-01-13 18:30' },
-  { groupName: '化工交流群', content: '感谢大家的支持，合作愉快！', time: '2025-01-13 16:10' },
-  { groupName: '供应商联盟', content: '下周有一批新货到，有需要的可以联系', time: '2025-01-13 11:25' },
-  { groupName: '产品采购群', content: '质量很好，已经收到货了', time: '2025-01-12 14:50' },
-  { groupName: '行业资讯', content: '转发：2025年化工行业发展趋势报告', time: '2025-01-12 10:30' },
-  { groupName: '技术讨论组', content: '这个问题我之前遇到过，可以这样解决...', time: '2025-01-11 17:40' }
-])
+// 最近消息 - 加载时为空
+const mockRecentMessages = ref<Array<{
+  groupName: string
+  content: string
+  time: string
+}>>([])
+
+// 占位符数据 - 最近图片 (加载时为空，由API填充)
+const mockPhotos = ref<Array<{
+  path: string
+  type: string
+  message_id: string
+}>>([])
 
 // 占位符数据 - 面板2: 信息变动
 const mockChanges = ref<ChangeRecord[]>([
   {
     id: '1',
     type: '用户名变更',
+    changeType: 2,
     oldValue: 'john_old',
     newValue: 'john_doe',
+    originalValue: 'john_old',
+    newOriginalValue: 'john_doe',
     time: '2025-01-10 14:30'
   },
   {
     id: '2',
     type: '个人简介更新',
+    changeType: 4,
     oldValue: '化工从业者',
     newValue: '化工行业从业者,专注于有机化学领域',
+    originalValue: '化工从业者',
+    newOriginalValue: '化工行业从业者,专注于有机化学领域',
     time: '2025-01-08 09:15'
   },
   {
     id: '3',
     type: '头像更换',
+    changeType: 3,
     oldValue: '默认头像',
     newValue: '自定义头像',
+    originalValue: '',
+    newOriginalValue: '',
     time: '2025-01-05 16:20'
   },
   {
     id: '4',
     type: '电话号码更新',
+    changeType: 1,
     oldValue: '+86 139****1234',
     newValue: '+86 138****5678',
+    originalValue: '+86 139****1234',
+    newOriginalValue: '+86 138****5678',
     time: '2025-01-03 11:45'
   },
   {
     id: '5',
     type: '备注名称修改',
+    changeType: 1,
     oldValue: '普通联系人',
     newValue: '重要联系人',
+    originalValue: '普通联系人',
+    newOriginalValue: '重要联系人',
     time: '2025-01-01 08:00'
   }
 ])
@@ -640,12 +1316,91 @@ const mockComments = ref<Comment[]>([
 
 const newComment = ref('')
 
-// 高亮关键词
-const highlightKeyword = (content: string, keyword: string) => {
-  if (!keyword) return content
-  const regex = new RegExp(`(${keyword})`, 'gi')
-  return content.replace(regex, '<span class="highlight">$1</span>')
+// 跳转到用户在指定群组的消息记录
+const navigateToGroupMessages = (group: GroupInfo) => {
+  if (!mockUserData.value.userId || !group.id) {
+    ElMessage.warning('缺少必要的群组或用户信息')
+    return
+  }
+
+  router.push({
+    path: '/chat-history',
+    query: {
+      group_id: group.id,
+      user_id: mockUserData.value.userId,
+      search_type: 'user_id'
+    }
+  })
 }
+
+// 图片预览状态
+const imagePreviewVisible = ref(false)
+const currentImageIndex = ref(-1)
+
+// 打开图片预览
+const openImagePreview = (index: number) => {
+  currentImageIndex.value = index
+  imagePreviewVisible.value = true
+}
+
+// 上一张
+const previousImage = () => {
+  if (currentImageIndex.value > 0) {
+    currentImageIndex.value--
+  }
+}
+
+// 下一张
+const nextImage = () => {
+  if (currentImageIndex.value < mockPhotos.value.length - 1) {
+    currentImageIndex.value++
+  }
+}
+
+// 图片加载错误处理
+const handleImageError = (e: Event) => {
+  const img = e.target as HTMLImageElement
+  img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iODAiIGhlaWdodD0iODAiIGZpbGw9IiNGNUY3RkEiLz48Y2lyY2xlIGN4PSI0MCIgY3k9IjQwIiByPSIzIiBmaWxsPSIjQ0NBQUQ4Ii8+PC9zdmc+'
+}
+
+// ==================== 档案状态相关函数 ====================
+
+/**
+ * 获取状态标签的中文显示名称
+ */
+const getStatusLabel = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'draft': '草稿',
+    'generated': '已生成',
+    'archived': '已归档'
+  }
+  return statusMap[status] || status
+}
+
+/**
+ * 获取状态对应的标签类型（用于Element Plus Tag组件）
+ */
+const getStatusTagType = (status: string): 'success' | 'primary' | 'warning' | 'info' | 'danger' => {
+  const typeMap: Record<string, 'success' | 'primary' | 'warning' | 'info' | 'danger'> = {
+    'draft': 'info',        // 灰色 - 草稿
+    'generated': 'success', // 绿色 - 已生成
+    'archived': 'warning'   // 橙色 - 已归档
+  }
+  return typeMap[status] || 'info'
+}
+
+/**
+ * 获取状态对应的图标组件
+ */
+const getStatusIcon = (status: string) => {
+  const iconMap: Record<string, any> = {
+    'draft': DocumentCopy,      // 文档副本图标 - 草稿
+    'generated': CircleCheck,   // 圆形检查图标 - 已生成
+    'archived': FolderDelete    // 删除文件夹图标 - 已归档
+  }
+  return iconMap[status] || DocumentCopy
+}
+
 </script>
 
 <style scoped lang="scss">
@@ -710,6 +1465,8 @@ const highlightKeyword = (content: string, keyword: string) => {
         align-items: center;
         gap: 8px;
         font-size: 14px;
+        width: 100%;
+        justify-content: space-between;
 
         .el-icon {
           font-size: 16px;
@@ -717,6 +1474,41 @@ const highlightKeyword = (content: string, keyword: string) => {
 
         .node-label {
           flex: 1;
+        }
+
+        .status-badge {
+          margin-left: 8px;
+          flex-shrink: 0;
+          :deep(.el-tag__content) {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+          }
+        }
+
+        .node-actions {
+          display: none;
+          margin-left: 8px;
+
+          :deep(.el-button-group) {
+            display: flex;
+            gap: 4px;
+
+            .el-button {
+              padding: 0 4px;
+              height: 24px;
+              line-height: 24px;
+              font-size: 12px;
+
+              .el-icon {
+                font-size: 12px;
+              }
+            }
+          }
+        }
+
+        &:hover .node-actions {
+          display: flex;
         }
       }
 
@@ -747,12 +1539,41 @@ const highlightKeyword = (content: string, keyword: string) => {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 16px;
+          gap: 16px;
 
-          h2 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-            color: #303133;
+          .profile-title-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+
+            h2 {
+              margin: 0;
+              font-size: 24px;
+              font-weight: 600;
+              color: #303133;
+            }
+
+            .header-status-badge {
+              display: flex;
+              align-items: center;
+              padding: 6px 12px;
+              border-radius: 4px;
+              font-size: 14px;
+              font-weight: 500;
+              white-space: nowrap;
+              flex-shrink: 0;
+
+              .el-icon {
+                font-size: 16px;
+              }
+
+              &:deep(.el-tag__content) {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+              }
+            }
           }
         }
 
@@ -809,7 +1630,65 @@ const highlightKeyword = (content: string, keyword: string) => {
                   flex: 1;
                   display: flex;
                   flex-direction: column;
-                  gap: 6px;
+                  gap: 8px;
+
+                  // 昵称行 - 大字体,备注灰色括号
+                  .nickname-row {
+                    display: flex;
+                    align-items: baseline;
+                    gap: 6px;
+
+                    .nickname-text {
+                      font-size: 20px;
+                      font-weight: 600;
+                      color: #303133;
+                      line-height: 1.2;
+                    }
+
+                    .remark-text {
+                      font-size: 14px;
+                      color: #909399;
+                      font-weight: 400;
+                    }
+                  }
+
+                  // 用户名行 - 蓝色等宽字体
+                  .username-row {
+                    .username-text {
+                      font-size: 14px;
+                      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                      color: #409eff;
+                      font-weight: 500;
+                    }
+                  }
+
+                  // 用户ID行
+                  .userid-row {
+                    .userid-text {
+                      font-size: 14px;
+                      color: #606266;
+                      font-weight: 500;
+                    }
+                  }
+
+                  // 个人简介
+                  .bio-row {
+                    margin-top: 4px;
+                    padding: 8px 12px;
+                    background-color: #f5f7fa;
+                    border-radius: 4px;
+                    border-left: 3px solid #409eff;
+
+                    .bio-text {
+                      font-size: 13px;
+                      color: #606266;
+                      line-height: 1.5;
+                      display: -webkit-box;
+                      -webkit-line-clamp: 3;
+                      -webkit-box-orient: vertical;
+                      overflow: hidden;
+                    }
+                  }
 
                   .info-row {
                     display: flex;
@@ -1012,37 +1891,172 @@ const highlightKeyword = (content: string, keyword: string) => {
                       font-weight: 500;
                     }
                   }
+
+                  // 头像变动样式
+                  .avatar-change-values {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+
+                    .avatar-change-item {
+                      display: flex;
+                      flex-direction: column;
+                      align-items: center;
+                      gap: 8px;
+                      flex: 1;
+
+                      .change-label-text {
+                        font-size: 11px;
+                        color: #909399;
+                        font-weight: 500;
+                      }
+
+                      .empty-avatar-box {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 40px;
+                        height: 40px;
+                        background-color: #f5f5f5;
+                        border: 1px dashed #d9d9d9;
+                        border-radius: 4px;
+                        font-size: 10px;
+                        color: #999;
+                        text-align: center;
+                      }
+
+                      .change-avatar-img {
+                        flex-shrink: 0;
+                        border: 1px solid #e4e7ed;
+                      }
+                    }
+
+                    .arrow-icon {
+                      align-self: flex-end;
+                      margin-bottom: 20px;
+                    }
+                  }
                 }
               }
 
               // 最近消息和图片展示
               .photo-gallery {
-                display: flex;
-                gap: 8px;
                 margin-top: 16px;
                 padding-top: 16px;
                 border-top: 1px solid #e4e7ed;
-                overflow-x: auto;
 
-                .photo-placeholder {
-                  flex-shrink: 0;
-                  width: 80px;
+                .image-row {
+                  display: flex;
+                  gap: 8px;
+                  overflow-x: auto;
+                  padding-bottom: 8px;
+
+                  .image-item-wrapper {
+                    flex-shrink: 0;
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    background-color: #f5f7fa;
+
+                    .message-image {
+                      width: 100%;
+                      height: 100%;
+                      object-fit: cover;
+                      cursor: pointer;
+                      transition: all 0.3s ease;
+                      display: block;
+
+                      &:hover {
+                        transform: scale(1.05);
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                      }
+                    }
+                  }
+                }
+
+                .photo-empty {
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  justify-content: center;
                   height: 80px;
                   background-color: #f5f7fa;
                   border: 1px dashed #d9d9d9;
-                  border-radius: 4px;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
+                  border-radius: 8px;
                   color: #c0c4cc;
-                  transition: all 0.3s ease;
-                  cursor: pointer;
 
-                  &:hover {
-                    background-color: #ecf5ff;
-                    border-color: #409eff;
-                    color: #409eff;
+                  p {
+                    margin: 0;
+                    font-size: 12px;
+                    margin-top: 8px;
                   }
+                }
+              }
+
+              // 图片预览对话框样式
+              :deep(.image-preview-container) {
+                width: 100%;
+                padding: 20px;
+
+                .preview-content {
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  gap: 16px;
+
+                  .preview-image {
+                    max-width: 100%;
+                    max-height: 60vh;
+                    object-fit: contain;
+                  }
+
+                  .preview-nav {
+                    display: flex;
+                    align-items: center;
+                    gap: 16px;
+                    justify-content: center;
+
+                    .nav-btn {
+                      padding: 8px 12px;
+                      border: 1px solid #dcdfe6;
+                      background: white;
+                      border-radius: 4px;
+                      cursor: pointer;
+                      transition: all 0.3s ease;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+
+                      &:hover:not(:disabled) {
+                        color: #409eff;
+                        border-color: #409eff;
+                      }
+
+                      &:disabled {
+                        opacity: 0.5;
+                        cursor: not-allowed;
+                      }
+                    }
+
+                    .preview-counter {
+                      font-size: 14px;
+                      color: #606266;
+                      min-width: 50px;
+                      text-align: center;
+                    }
+                  }
+                }
+              }
+
+              :deep(.el-dialog) {
+                .el-dialog__header {
+                  border-bottom: 1px solid #ebeef5;
+                  padding: 16px 20px;
+                }
+
+                .el-dialog__body {
+                  padding: 0;
                 }
               }
 
@@ -1065,6 +2079,14 @@ const highlightKeyword = (content: string, keyword: string) => {
                 padding: 2px 4px;
                 border-radius: 2px;
                 font-weight: 600;
+              }
+
+              :deep(.keyword-highlight) {
+                background-color: #FFF3CD;
+                color: #856404;
+                font-weight: bold;
+                padding: 2px 4px;
+                border-radius: 2px;
               }
 
               // 面板5: 关联图谱 - 压缩高度

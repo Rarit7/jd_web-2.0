@@ -150,11 +150,12 @@ def get_profile_by_tg_user(tg_user_id):
         profile = AnalyticsUserProfile.get_by_tg_user_id(tg_user_id)
 
         if not profile:
+            # 档案不存在是正常业务状态，应该返回 200 + err_code:1，而不是 404
             return jsonify({
                 'err_code': 1,
                 'err_msg': '未找到该用户的档案',
                 'payload': {}
-            }), 404
+            })
 
         tg_user_info = profile.get_tg_user_info()
 

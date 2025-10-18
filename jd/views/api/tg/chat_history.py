@@ -1578,3 +1578,156 @@ def get_enhanced_document_info(chat_id, message_id, fallback_path=None, fallback
     except Exception as e:
         logger.error(f'获取增强文档信息失败: {e}')
         return None
+
+
+@api.route('/tg/user/recent_messages/<user_id>', methods=['GET'])
+def get_user_recent_messages(user_id):
+    """
+    获取用户最近的聊天记录和图片
+
+    返回：
+    - recent_messages: 用户最近20条聊天记录（包含群组名、发言时间）
+    - recent_photos: 用户最近10条包含图片或document类型文件的聊天记录中的图片本地存储地址
+    """
+    try:
+        # 验证参数
+        if not user_id:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '用户ID不能为空',
+                'payload': {}
+            }), 400
+
+        # 1. 获取最近20条聊天记录
+        recent_messages_query = db.session.query(
+            TgGroupChatHistory.id,
+            TgGroupChatHistory.message_id,
+            TgGroupChatHistory.chat_id,
+            TgGroupChatHistory.message,
+            TgGroupChatHistory.postal_time,
+            TgGroup.title.label('group_name'),
+            TgGroup.name.label('group_name_alt')
+        ).join(
+            TgGroup,
+            TgGroupChatHistory.chat_id == TgGroup.chat_id,
+            isouter=True
+        ).filter(
+            TgGroupChatHistory.user_id == user_id
+        ).order_by(
+            TgGroupChatHistory.postal_time.desc()
+        ).limit(20)
+
+        recent_messages = recent_messages_query.all()
+
+        # 格式化聊天记录
+        messages_list = []
+        for msg in recent_messages:
+            group_name = msg.group_name or msg.group_name_alt or f'群组_{msg.chat_id}'
+            messages_list.append({
+                'message_id': msg.message_id,
+                'group_id': msg.chat_id,
+                'group_name': group_name,
+                'content': msg.message[:100] + '...' if len(msg.message or '') > 100 else msg.message,
+                'time': msg.postal_time.strftime('%Y-%m-%d %H:%M:%S') if msg.postal_time else ''
+            })
+
+        # 2. 获取最近10条包含photo或document的聊天记录
+        photo_messages_query = db.session.query(
+            TgGroupChatHistory.id,
+            TgGroupChatHistory.message_id,
+            TgGroupChatHistory.chat_id,
+            TgGroupChatHistory.photo_path,
+            TgGroupChatHistory.document_path,
+            TgGroupChatHistory.document_ext,
+            TgDocumentInfo.filepath,
+            TgDocumentInfo.filename_origin,
+            TgDocumentInfo.mime_type,
+            TgDocumentInfo.file_size,
+            TgDocumentInfo.video_thumb_path
+        ).outerjoin(
+            TgDocumentInfo,
+            (TgGroupChatHistory.chat_id == TgDocumentInfo.chat_id) &
+            (TgGroupChatHistory.message_id == TgDocumentInfo.message_id)
+        ).filter(
+            TgGroupChatHistory.user_id == user_id,
+            (TgGroupChatHistory.photo_path != '') | (TgGroupChatHistory.document_path != '')
+        ).order_by(
+            TgGroupChatHistory.postal_time.desc()
+        ).limit(10)
+
+        photo_messages = photo_messages_query.all()
+
+        # 处理图片和文档信息
+        photos_list = []
+        for msg in photo_messages:
+            # 优先使用photo_path
+            if msg.photo_path:
+                photo_path = msg.photo_path
+                # 转换为相对于static文件夹的路径
+                if not photo_path.startswith('/'):
+                    if not photo_path.startswith('images/'):
+                        photo_path = f'images/{photo_path}'
+                photos_list.append({
+                    'message_id': msg.message_id,
+                    'type': 'photo',
+                    'path': photo_path,
+                    'original_path': msg.photo_path
+                })
+
+            # 然后处理document中的图片类型
+            elif msg.document_path or msg.filepath:
+                doc_path = msg.filepath or msg.document_path
+                mime_type = msg.mime_type or ''
+                filename = msg.filename_origin or ''
+
+                # 检查是否是图片类型
+                if is_image_mime_type(mime_type) or (filename and filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))):
+                    # 转换为相对于static文件夹的路径
+                    if not doc_path.startswith('/'):
+                        if not doc_path.startswith('document/') and not doc_path.startswith('images/'):
+                            doc_path = f'document/{doc_path}'
+
+                    photos_list.append({
+                        'message_id': msg.message_id,
+                        'type': 'document',
+                        'path': doc_path,
+                        'filename': filename or '',
+                        'mime_type': mime_type,
+                        'file_size': msg.file_size or 0
+                    })
+
+            # 处理视频缩略图
+            if msg.video_thumb_path:
+                thumb_path = msg.video_thumb_path
+                if not thumb_path.startswith('/'):
+                    if not thumb_path.startswith('document/'):
+                        thumb_path = f'document/{thumb_path}'
+
+                # 检查列表中是否已有该消息的记录
+                existing = next((p for p in photos_list if p['message_id'] == msg.message_id), None)
+                if existing:
+                    existing['video_thumb_path'] = thumb_path
+                else:
+                    photos_list.append({
+                        'message_id': msg.message_id,
+                        'type': 'video_thumbnail',
+                        'path': thumb_path,
+                        'filename': msg.filename_origin or ''
+                    })
+
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '',
+            'payload': {
+                'recent_messages': messages_list,
+                'recent_photos': photos_list[:10]  # 确保最多返回10条
+            }
+        })
+
+    except Exception as e:
+        logger.error(f'获取用户最近消息失败: {e}', exc_info=True)
+        return jsonify({
+            'err_code': 1,
+            'err_msg': f'获取用户最近消息失败: {str(e)}',
+            'payload': {}
+        }), 500

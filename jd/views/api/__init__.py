@@ -67,3 +67,4 @@ from . import change_record
 from . import system
 from . import job_queue
 from . import ad_tracking
+from . import user_profile

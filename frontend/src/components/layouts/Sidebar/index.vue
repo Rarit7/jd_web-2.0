@@ -242,22 +242,26 @@ const routes = computed(() => {
   ]
 
   // 过滤有权限访问的路由
-  return allRoutes.filter(route => {
-    const hasRoutePermission = hasPermission(route.meta?.roles)
-    if (route.children) {
-      // 创建子路由的副本，不修改原始数组
-      const filteredChildren = route.children.filter(child => hasPermission(child.meta?.roles))
-      // 创建路由副本并设置过滤后的子路由
-      const routeCopy = { ...route, children: filteredChildren }
-      // 只有当父路由有权限或者有可访问的子路由时才显示
-      if (hasRoutePermission || filteredChildren.length > 0) {
-        Object.assign(route, routeCopy)
-        return true
+  return allRoutes
+    .filter(route => {
+      const hasRoutePermission = hasPermission(route.meta?.roles)
+      if (route.children) {
+        const filteredChildren = route.children.filter(child => hasPermission(child.meta?.roles))
+        // 只有当父路由有权限或者有可访问的子路由时才显示
+        return hasRoutePermission || filteredChildren.length > 0
       }
-      return false
-    }
-    return hasRoutePermission
-  })
+      return hasRoutePermission
+    })
+    .map(route => {
+      // 如果有子路由，返回新对象并过滤子路由
+      if (route.children) {
+        return {
+          ...route,
+          children: route.children.filter(child => hasPermission(child.meta?.roles))
+        }
+      }
+      return route
+    })
 })
 
 const activeMenu = computed(() => {

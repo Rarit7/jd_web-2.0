@@ -283,19 +283,21 @@ class TgUserInfoProcessor:
                 # 处理头像
                 if hasattr(user_entity, 'photo') and user_entity.photo:
                     try:
+                        # 使用 photo_id 作为文件名，而不是 user_id
+                        photo_id = str(user_entity.photo.photo_id)
                         avatar_dir = os.path.join(app.static_folder, 'images/avatar')
                         os.makedirs(avatar_dir, exist_ok=True)
-                        
-                        file_name = f'{user_id}.jpg'
+
+                        file_name = f'{photo_id}.jpg'
                         file_full_path = f'{avatar_dir}/{file_name}'
-                        
+
                         # 下载头像到本地
                         if not os.path.exists(file_full_path):
                             await self.tg.client.download_profile_photo(user_entity, file_full_path)
                             logger.debug(f'下载用户 {user_id} 头像成功: {file_name}')
-                        
+
                         avatar_path = f'images/avatar/{file_name}'
-                        
+
                     except Exception as e:
                         logger.warning(f'下载用户 {user_id} 头像失败: {e}')
                         
@@ -521,16 +523,18 @@ class TgUserInfoProcessor:
                     sender_entity = user_data.get('sender_entity')
                     if sender_entity and hasattr(sender_entity, 'photo') and sender_entity.photo:
                         try:
+                            # 使用 photo_id 作为文件名，而不是 user_id
+                            photo_id = str(sender_entity.photo.photo_id)
                             avatar_dir = os.path.join(app.static_folder, 'images/avatar')
                             os.makedirs(avatar_dir, exist_ok=True)
 
-                            file_name = f'{user_id}.jpg'
+                            file_name = f'{photo_id}.jpg'
                             file_full_path = f'{avatar_dir}/{file_name}'
 
                             # 下载头像到本地
                             if not os.path.exists(file_full_path):
                                 await self.tg.client.download_profile_photo(sender_entity, file_full_path)
-                                logger.debug(f'批量下载用户 {user_id} 头像成功: {file_name}')
+                                logger.debug(f'批量下载用户 {user_id} 头像成功: {file_name} (photo_id: {photo_id})')
 
                             avatar_path = f'images/avatar/{file_name}'
                         except Exception as e:

@@ -65,6 +65,8 @@ declare module 'vue' {
     ElText: typeof import('element-plus/es')['ElText']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElTree: typeof import('element-plus/es')['ElTree']
+    ElTreeSelect: typeof import('element-plus/es')['ElTreeSelect']
+    FolderManager: typeof import('./components/UserProfile/FolderManager.vue')['default']
     Hamburger: typeof import('./components/common/Hamburger.vue')['default']
     HighlightText: typeof import('./components/HighlightText.vue')['default']
     Link: typeof import('./components/layouts/Sidebar/Link.vue')['default']

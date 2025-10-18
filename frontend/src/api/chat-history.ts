@@ -111,6 +111,37 @@ export interface PrivateChatConversationsResponse {
   }
 }
 
+// 用户最近消息接口
+export interface RecentMessage {
+  message_id: string
+  group_id: string
+  group_name: string
+  content: string
+  time: string
+}
+
+// 用户最近图片接口
+export interface RecentPhoto {
+  message_id: string
+  type: 'photo' | 'document' | 'video_thumbnail'
+  path: string
+  filename?: string
+  mime_type?: string
+  file_size?: number
+  video_thumb_path?: string
+  original_path?: string
+}
+
+// 用户最近消息和图片响应接口
+export interface UserRecentMessagesResponse {
+  err_code: number
+  err_msg: string
+  payload: {
+    recent_messages: RecentMessage[]
+    recent_photos: RecentPhoto[]
+  }
+}
+
 export const chatHistoryApi = {
   // 获取聊天记录列表
   getList: (params: ChatHistoryParams = {}) => {
@@ -209,5 +240,10 @@ export const chatHistoryApi = {
   // 获取指定用户的私聊对话列表
   getPrivateChatConversations: (ownerUserId: string) => {
     return request.get<PrivateChatConversationsResponse>(`/tg/private_chat/by_user/${ownerUserId}`)
+  },
+
+  // 获取用户最近消息和图片（用于用户档案页面）
+  getUserRecentMessages: (userId: string) => {
+    return request.get<UserRecentMessagesResponse>(`/tg/user/recent_messages/${userId}`)
   }
 }

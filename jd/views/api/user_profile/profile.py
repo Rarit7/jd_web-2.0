@@ -150,10 +150,11 @@ def get_profile_by_tg_user(tg_user_id):
         profile = AnalyticsUserProfile.get_by_tg_user_id(tg_user_id)
 
         if not profile:
-            # 档案不存在是正常业务状态，应该返回 200 + err_code:1，而不是 404
+            # 档案不存在是正常业务状态
+            # 返回 200 + err_code:1，但不使用 err_msg 以避免前端axios拦截器自动弹窗
             return jsonify({
                 'err_code': 1,
-                'err_msg': '未找到该用户的档案',
+                'err_msg': '',  # 空的err_msg，这样axios拦截器不会弹窗
                 'payload': {}
             })
 

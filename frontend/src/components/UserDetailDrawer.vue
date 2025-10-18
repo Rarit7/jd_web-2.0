@@ -589,7 +589,7 @@ watch([() => props.userDetail, () => props.userId, () => props.visible],
       loadUserTags()
       loadUserGroups()
       loadUserChangeRecords(currentUserDetail.value.user_id)
-      checkProfileExists(currentUserDetail.value.user_id)
+      await checkProfileExists(currentUserDetail.value.user_id)
     }
   },
   { immediate: true }
@@ -1009,19 +1009,25 @@ const navigateToUserMessages = (group: UserGroup) => {
 // 检查用户档案是否存在
 const checkProfileExists = async (user_id: string) => {
   try {
+    console.log(`[checkProfileExists] 开始检查用户 ${user_id} 的档案`)
     const response = await userProfileApi.getByTgUser(user_id)
     const data = (response.data as any)
 
+    console.log(`[checkProfileExists] API 响应:`, data)
+
     if (data.err_code === 0) {
       const profile = data.payload?.profile
-      profileExists.value = !!profile && !profile.is_deleted
+      const exists = !!profile && !profile.is_deleted
+      profileExists.value = exists
+      console.log(`[checkProfileExists] 档案存在: ${exists}`)
     } else {
       // err_code不为0表示档案不存在
+      console.log(`[checkProfileExists] err_code=${data.err_code}，档案不存在`)
       profileExists.value = false
     }
   } catch (error: any) {
     // 网络错误时假设档案不存在
-    console.debug('用户档案检查失败，假设档案不存在')
+    console.warn(`[checkProfileExists] 检查失败:`, error.message)
     profileExists.value = false
   }
 }

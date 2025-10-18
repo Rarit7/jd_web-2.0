@@ -22,6 +22,12 @@ class BaseModel(db.Model):
             elif isinstance(v, (dict, list)):
                 # JSON 类型字段（如 extra_info）直接保留原始值，不转换为字符串
                 pass
+            elif isinstance(v, bool):
+                # 布尔值保持原值，不转换为字符串
+                pass
+            elif isinstance(v, int):
+                # 整数保持原值，不转换为字符串
+                pass
             elif v is not None:
                 v = format(v)
             data[k] = v

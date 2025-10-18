@@ -85,7 +85,7 @@
           <div class="placeholder-item focus-switch-item">
             <span class="label">重点关注:</span>
             <div class="focus-switch-container">
-              <el-switch 
+              <el-switch
                 v-model="localKeyFocus"
                 @change="handleFocusToggle"
                 :loading="focusLoading"
@@ -94,6 +94,31 @@
                 size="default"
               />
             </div>
+          </div>
+
+          <!-- 创建全息档案按钮 -->
+          <div class="placeholder-item holistic-profile-item">
+            <el-button
+              v-if="!profileExists"
+              type="primary"
+              size="small"
+              @click="handleCreateHolisticProfile"
+              :loading="profileCreating"
+              class="holistic-profile-btn"
+            >
+              <el-icon><Plus /></el-icon>
+              创建全息档案
+            </el-button>
+            <el-button
+              v-else
+              type="success"
+              disabled
+              size="small"
+              class="holistic-profile-btn"
+            >
+              <el-icon><SuccessFilled /></el-icon>
+              已创建全息档案
+            </el-button>
           </div>
         </div>
 
@@ -279,7 +304,7 @@
             </div>
           </div>
         </div>
-        
+
         <div class="selected-tags-section" v-if="userTags.length > 0">
           <h4>已选标签：</h4>
           <div class="selected-tags">
@@ -297,10 +322,65 @@
           </div>
         </div>
       </div>
-      
+
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="showTagDialog = false">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 创建全息档案对话框 -->
+    <el-dialog
+      v-model="createProfileDialogVisible"
+      title="创建全息档案"
+      width="500px"
+      @close="resetCreateProfileForm"
+      append-to-body
+    >
+      <el-form
+        ref="createProfileFormRef"
+        :model="createProfileForm"
+        :rules="createProfileRules"
+        label-width="100px"
+        @submit.prevent
+      >
+        <el-form-item label="档案标题" prop="profile_name">
+          <el-input
+            v-model="createProfileForm.profile_name"
+            placeholder="请输入档案标题"
+            clearable
+          />
+        </el-form-item>
+
+        <el-form-item label="所属目录" prop="folder_id">
+          <el-tree-select
+            v-model="createProfileForm.folder_id"
+            :data="folderOnlyData"
+            :props="treeSelectorProps"
+            clearable
+            placeholder="选择所属目录（可选）"
+          />
+        </el-form-item>
+
+        <el-form-item label="档案状态" prop="status">
+          <el-select
+            v-model="createProfileForm.status"
+            placeholder="请选择档案状态"
+          >
+            <el-option label="草稿" value="draft" />
+            <el-option label="已生成" value="generated" />
+            <el-option label="已归档" value="archived" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="createProfileDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSaveHolisticProfile" :loading="profileCreating">
+            创建档案
+          </el-button>
         </span>
       </template>
     </el-dialog>
@@ -309,12 +389,14 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
-import { Edit, Plus, ArrowRight } from '@element-plus/icons-vue'
+import { Edit, Plus, ArrowRight, SuccessFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { chatHistoryApi } from '@/api/chat-history'
 import { tgUsersApi } from '@/api/tg-users'
 import { tagsApi, type Tag as TagType } from '@/api/tags'
+import { userProfileApi, profileFolderApi, type FolderTreeNode } from '@/api/user-profile'
+import { useUserStore } from '@/store/modules/user'
 
 // 定义用户信息接口
 interface UserInfo {
@@ -366,12 +448,68 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const router = useRouter()
+const userStore = useUserStore()
 
 // 响应式数据
 const editingRemark = ref(false)
 const tempRemark = ref('')
 const localRemark = ref('')
 const remarkInput = ref()
+
+// 全息档案相关
+const profileExists = ref(false)
+const profileCreating = ref(false)
+const createProfileDialogVisible = ref(false)
+
+interface CreateProfileForm {
+  profile_name: string
+  folder_id: number | null
+  status: 'draft' | 'generated' | 'archived'
+}
+
+const createProfileForm = ref<CreateProfileForm>({
+  profile_name: '',
+  folder_id: null,
+  status: 'draft'
+})
+const createProfileFormRef = ref()
+
+// 文件夹树数据
+const folderTreeData = ref<FolderTreeNode[]>([])
+
+// 表单验证规则
+const createProfileRules = {
+  profile_name: [
+    { required: true, message: '请输入档案标题', trigger: 'blur' },
+    { min: 1, max: 200, message: '档案标题长度在 1 到 200 个字符之间', trigger: 'blur' }
+  ]
+}
+
+// 树形选择器配置
+const treeSelectorProps = {
+  children: 'children',
+  label: 'label',
+  value: 'folder_numeric_id'
+}
+
+// 过滤出只包含文件夹的树形数据
+const folderOnlyData = computed(() => {
+  const filterFolders = (nodes: any[]): any[] => {
+    return nodes
+      .filter(node => node.type === 'folder')
+      .map(node => {
+        // 从 "folder_123" 格式中提取数字 ID
+        const numericId = parseInt((node.id as string).replace('folder_', ''))
+        return {
+          ...node,
+          folder_numeric_id: numericId,
+          children: node.children ? filterFolders(node.children) : []
+        }
+      })
+  }
+
+  return filterFolders(folderTreeData.value)
+})
 
 const showTagDialog = ref(false)
 const userTags = ref<Tag[]>([])
@@ -451,8 +589,9 @@ watch([() => props.userDetail, () => props.userId, () => props.visible],
       loadUserTags()
       loadUserGroups()
       loadUserChangeRecords(currentUserDetail.value.user_id)
+      checkProfileExists(currentUserDetail.value.user_id)
     }
-  }, 
+  },
   { immediate: true }
 )
 
@@ -511,15 +650,15 @@ const cancelEditRemark = () => {
 }
 
 // 处理重点关注开关
-const handleFocusToggle = async (value: boolean) => {
+const handleFocusToggle = async (value: string | number | boolean) => {
   const userDetail = currentUserDetail.value
   if (!userDetail) return
-  
+
   focusLoading.value = true
   try {
     // 调用API更新重点关注状态
     const response = await tgUsersApi.toggleFocus(userDetail.id)
-    
+
     if (response.data.err_code === 0) {
       // 更新本地状态
       localKeyFocus.value = response.data.payload.is_key_focus
@@ -529,13 +668,13 @@ const handleFocusToggle = async (value: boolean) => {
       ElMessage.success(response.data.payload.message)
     } else {
       // 如果失败，恢复先前的状态
-      localKeyFocus.value = !value
+      localKeyFocus.value = typeof value === 'boolean' ? !value : false
       ElMessage.error(response.data.err_msg || '操作失败')
     }
   } catch (error) {
     console.error('更新重点关注状态失败:', error)
     // 如果失败，恢复先前的状态
-    localKeyFocus.value = !value
+    localKeyFocus.value = typeof value === 'boolean' ? !value : false
     ElMessage.error('操作失败')
   } finally {
     focusLoading.value = false
@@ -856,15 +995,121 @@ const loadCompleteUserInfo = async (user_id: string) => {
 const navigateToUserMessages = (group: UserGroup) => {
   const userDetail = currentUserDetail.value
   if (!userDetail) return
-  
+
   // 触发父组件事件，实现页面内导航
   emit('navigate-to-user-messages', {
     groupId: group.chat_id,
     userId: userDetail.user_id
   })
-  
+
   // 关闭抽屉
   emit('update:visible', false)
+}
+
+// 检查用户档案是否存在
+const checkProfileExists = async (user_id: string) => {
+  try {
+    const response = await userProfileApi.getByTgUser(user_id)
+    const data = (response.data as any)
+    if (data.err_code === 0) {
+      const profile = data.payload?.profile
+      profileExists.value = !!profile && !profile.is_deleted
+    } else {
+      // 404或其他错误表示档案不存在
+      profileExists.value = false
+    }
+  } catch (error: any) {
+    // 网络错误或404都表示档案不存在，不显示警告信息
+    console.debug('用户档案检查:', error.response?.status === 404 ? '档案不存在' : '检查失败')
+    profileExists.value = false
+  }
+}
+
+// 加载文件夹树数据
+const loadFolderTree = async () => {
+  try {
+    const response = await profileFolderApi.getTree()
+    if ((response.data as any).err_code === 0) {
+      folderTreeData.value = (response.data as any).payload.tree_data
+    } else {
+      ElMessage.error((response.data as any).err_msg || '加载文件夹树失败')
+    }
+  } catch (error: any) {
+    console.error('加载文件夹树失败:', error)
+    ElMessage.error('加载文件夹树失败')
+  }
+}
+
+// 打开创建全息档案对话框
+const handleCreateHolisticProfile = async () => {
+  const userDetail = currentUserDetail.value
+  if (!userDetail) {
+    ElMessage.warning('用户信息不完整')
+    return
+  }
+
+  // 加载文件夹树
+  await loadFolderTree()
+
+  // 初始化表单
+  createProfileForm.value = {
+    profile_name: userDetail.senderName || userDetail.username || `用户${userDetail.user_id}`,
+    folder_id: null,
+    status: 'draft'
+  }
+
+  createProfileDialogVisible.value = true
+}
+
+// 保存全息档案
+const handleSaveHolisticProfile = async () => {
+  if (!createProfileFormRef.value) return
+
+  await createProfileFormRef.value.validate(async (valid: boolean) => {
+    if (valid) {
+      const userDetail = currentUserDetail.value
+      if (!userDetail) return
+
+      profileCreating.value = true
+      try {
+        const payload = {
+          tg_user_id: userDetail.user_id,
+          profile_name: createProfileForm.value.profile_name,
+          created_by: userStore.userInfo?.id || 1,
+          folder_id: createProfileForm.value.folder_id ? parseInt(String(createProfileForm.value.folder_id)) : null,
+          status: createProfileForm.value.status
+        }
+
+        console.log('创建档案请求:', payload)
+        const response = await userProfileApi.create(payload)
+
+        if ((response.data as any).err_code === 0) {
+          ElMessage.success('全息档案创建成功')
+          profileExists.value = true
+          createProfileDialogVisible.value = false
+        } else {
+          ElMessage.error((response.data as any).err_msg || '创建全息档案失败')
+        }
+      } catch (error: any) {
+        console.error('创建全息档案失败:', error)
+        ElMessage.error('创建全息档案失败: ' + (error.response?.data?.err_msg || error.message))
+      } finally {
+        profileCreating.value = false
+      }
+    }
+  })
+}
+
+// 重置创建档案表单
+const resetCreateProfileForm = () => {
+  if (createProfileFormRef.value) {
+    createProfileFormRef.value.clearValidate()
+  }
+  createProfileForm.value = {
+    profile_name: '',
+    folder_id: null,
+    status: 'draft'
+  }
 }
 </script>
 
@@ -1231,6 +1476,24 @@ const navigateToUserMessages = (group: UserGroup) => {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+  }
+}
+
+/* 全息档案按钮样式 */
+.holistic-profile-item {
+  flex-direction: column;
+  align-items: flex-start !important;
+  padding: 12px 0 !important;
+  border-bottom: none !important;
+
+  .holistic-profile-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 500;
   }
 }
 

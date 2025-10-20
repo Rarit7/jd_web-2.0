@@ -418,8 +418,10 @@ def execute_ad_tracking_task():
 
     Request Body:
         {
-            "task_type": "daily" | "historical" | "chat_record" | "user_info" | "group_info",
-            "target_date": "YYYY-MM-DD" (仅daily任务),
+            "task_type": "daily" | "date_range" | "historical" | "chat_record" | "user_info" | "group_info",
+            "target_date": "YYYY-MM-DD" (仅daily任务 - 处理指定日期),
+            "start_date": "YYYY-MM-DD" (仅date_range任务),
+            "end_date": "YYYY-MM-DD" (仅date_range任务),
             "batch_size": int (仅historical任务),
             "max_batches": int (仅historical任务),
             "record_id": int (仅chat_record任务),
@@ -431,12 +433,13 @@ def execute_ad_tracking_task():
         data = request.get_json() or {}
         task_type = data.get('task_type', 'daily')
 
-        if task_type not in ['daily', 'historical', 'chat_record', 'user_info', 'group_info']:
+        if task_type not in ['daily', 'date_range', 'historical', 'chat_record', 'user_info', 'group_info']:
             return jsonify({'err_code': 1, 'err_msg': '无效的任务类型'})
 
         # 动态导入任务以避免循环导入
         from jd.tasks.ad_tracking_task import (
             daily_ad_tracking_task,
+            date_range_ad_tracking_task,
             historical_ad_tracking_batch_task,
             process_chat_record_task,
             process_user_info_task,
@@ -447,6 +450,12 @@ def execute_ad_tracking_task():
         if task_type == 'daily':
             target_date = data.get('target_date')
             task = daily_ad_tracking_task.delay(target_date)
+        elif task_type == 'date_range':
+            start_date = data.get('start_date')
+            end_date = data.get('end_date')
+            if not start_date or not end_date:
+                return jsonify({'err_code': 1, 'err_msg': 'start_date和end_date参数必填'})
+            task = date_range_ad_tracking_task.delay(start_date, end_date)
         elif task_type == 'historical':
             batch_size = data.get('batch_size', 1000)
             max_batches = data.get('max_batches')

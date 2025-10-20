@@ -206,46 +206,6 @@ def process_group_info_task(self, chat_id: str) -> Dict[str, Any]:
         raise self.retry(countdown=60, max_retries=3, exc=e)
 
 
-@celery.task(bind=True, queue='jd.celery.first', name='ad_tracking.cleanup_old_records')
-def cleanup_old_ad_tracking_records(self, days_to_keep: int = 180) -> Dict[str, Any]:
-    """
-    清理旧的广告追踪记录（可选任务）
-
-    Args:
-        days_to_keep: 保留天数，默认180天
-
-    Returns:
-        清理结果
-    """
-    try:
-        logger.info(f"Starting cleanup of ad tracking records older than {days_to_keep} days")
-
-        with app.app_context():
-            from jd.models.ad_tracking import AdTracking
-
-            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
-
-            # 删除过期记录
-            deleted_count = AdTracking.query.filter(
-                AdTracking.last_seen < cutoff_date
-            ).delete(synchronize_session=False)
-
-            db.session.commit()
-
-            result = {
-                'status': 'success',
-                'deleted_count': deleted_count,
-                'cutoff_date': cutoff_date.isoformat(),
-                'days_kept': days_to_keep
-            }
-
-            logger.info(f"Cleanup completed: {result}")
-            return result
-
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Cleanup failed: {str(e)}", exc_info=True)
-        raise
 
 
 # 定时任务配置（在 scripts/worker.py 的 beat_schedule 中配置）
@@ -260,12 +220,6 @@ celery.conf.beat_schedule = {
         'task': 'ad_tracking.daily_task',
         'schedule': crontab(hour=1, minute=0),
         'args': ()
-    },
-    # 每周日凌晨3点清理旧记录
-    'weekly-cleanup-ad-tracking': {
-        'task': 'ad_tracking.cleanup_old_records',
-        'schedule': crontab(hour=3, minute=0, day_of_week=0),
-        'args': (180,)  # 保留180天
     },
 }
 """

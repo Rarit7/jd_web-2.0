@@ -5,6 +5,7 @@ from typing import Dict, List, Any, Optional
 from jd import db
 from jd.models.tag_keyword_mapping import TagKeywordMapping
 from jd.models.auto_tag_log import AutoTagLog
+from jd.models.url_tag_log import UrlTagLog
 from jd.models.tg_group_user_tag import TgGroupUserTag
 from jd.models.tg_group_user_info import TgGroupUserInfo
 from jd.models.tg_group_chat_history import TgGroupChatHistory
@@ -114,8 +115,8 @@ class AutoTaggingService:
         构建 detail_info JSON 数据
 
         Args:
-            source_type: 来源类型 (chat, nickname, desc)
-            user_id: 用户ID
+            source_type: 来源类型 (chat, nickname, desc, website_title)
+            user_id: 用户ID (对于网站可能为空或URL)
             keyword: 触发的关键词
             source_id: 来源记录ID
             context_data: 上下文数据
@@ -159,6 +160,25 @@ class AutoTaggingService:
                     'user_username': context_data.get('user_username', ''),
                     'desc': context_data.get('desc', ''),
                     'matched_text': keyword
+                }
+
+            elif source_type == 'website_title':
+                # 网站标题类型
+                return {
+                    'url': context_data.get('url', ''),
+                    'domain': context_data.get('domain', ''),
+                    'website_title': (context_data.get('website_title', '') or '')[:500],  # 限制长度
+                    'matched_text': keyword
+                }
+
+            elif source_type == 'website_content':
+                # 网站内容类型（预留，后续可扩展）
+                return {
+                    'url': context_data.get('url', ''),
+                    'domain': context_data.get('domain', ''),
+                    'website_title': context_data.get('website_title', ''),
+                    'matched_text': keyword,
+                    'content_snippet': (context_data.get('content_snippet', '') or '')[:500]
                 }
 
         except Exception as e:
@@ -582,6 +602,243 @@ class AutoTaggingService:
             db.session.rollback()
 
         logger.info(f"User info batch processing completed: {stats}")
+        return stats
+
+    def process_website_title(self, url: str, domain: str, website_title: str,
+                             tracking_id: str = None, source_id: str = None) -> List[Dict[str, Any]]:
+        """
+        处理网站标题进行自动标签匹配
+
+        Args:
+            url: 网站URL
+            domain: 域名
+            website_title: 网站标题
+            tracking_id: 追踪ID (用于标签关联，来自 ad_tracking.id)
+            source_id: 来源记录ID (可选，默认使用tracking_id)
+
+        Returns:
+            匹配到的标签信息列表
+        """
+        if not website_title or not website_title.strip():
+            return []
+
+        source_id = source_id or tracking_id or url
+
+        try:
+            matched_tags = self.process_text_for_tags(
+                website_title,
+                tracking_id or url,  # 用tracking_id或URL作为"用户ID"
+                'website_title',
+                source_id
+            )
+
+            logger.debug(f"Matched {len(matched_tags)} tags for website title: {website_title[:50]}")
+            return matched_tags
+
+        except Exception as e:
+            logger.error(f"Failed to process website title for auto tagging: {str(e)}")
+            return []
+
+    def apply_website_tags(self, url: str, domain: str, website_title: str,
+                          matched_tags: List[Dict[str, Any]], tracking_id: int = None,
+                          source_type: str = 'website_title', commit: bool = True) -> int:
+        """
+        应用网站标题标签到广告追踪记录
+
+        Args:
+            url: 网站URL
+            domain: 域名
+            website_title: 网站标题
+            matched_tags: 匹配到的标签信息列表
+            tracking_id: 追踪ID (ad_tracking.id，整数)
+            source_type: 标签来源类型 (website_title/website_content)
+            commit: 是否立即提交
+
+        Returns:
+            成功应用的标签数量
+        """
+        if not matched_tags or not tracking_id:
+            return 0
+
+        applied_count = 0
+
+        try:
+            for tag_info in matched_tags:
+                # 检查是否已存在（避免重复）
+                existing_log = UrlTagLog.query.filter_by(
+                    tracking_id=tracking_id,
+                    tag_id=tag_info['tag_id']
+                ).first()
+
+                if existing_log:
+                    logger.debug(f"Tag {tag_info['tag_id']} already exists for tracking {tracking_id}")
+                    continue
+
+                # 构建上下文数据
+                context_data = {
+                    'url': url,
+                    'domain': domain,
+                    'website_title': website_title,
+                    'matched_text': tag_info['keyword']
+                }
+
+                # 记录URL标签日志（使用新的 UrlTagLog 表）
+                url_tag_log = UrlTagLog(
+                    tracking_id=tracking_id,
+                    url=url,
+                    domain=domain,
+                    tag_id=tag_info['tag_id'],
+                    keyword=tag_info['keyword'],
+                    source_type=source_type,
+                    detail_info=self._build_detail_info(
+                        source_type, str(tracking_id), tag_info['keyword'],
+                        str(tracking_id), context_data
+                    )
+                )
+                db.session.add(url_tag_log)
+
+                applied_count += 1
+                logger.debug(f"Applied tag {tag_info['tag_id']} to URL {domain} "
+                            f"via keyword '{tag_info['keyword']}'")
+
+            if commit:
+                db.session.commit()
+                logger.info(f"Successfully applied {applied_count} auto tags for URL {domain}")
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to apply website tags for {url}: {str(e)}")
+            raise
+
+        return applied_count
+
+    def process_and_tag_website(self, url: str, domain: str, website_title: str,
+                               tracking_id: int = None, source_type: str = 'website_title') -> int:
+        """
+        一体化处理：从网站标题匹配标签并应用
+
+        Args:
+            url: 网站URL
+            domain: 域名
+            website_title: 网站标题
+            tracking_id: 追踪ID (ad_tracking.id，整数)
+            source_type: 标签来源类型 (website_title/website_content)
+
+        Returns:
+            成功应用的标签数量
+        """
+        # 第1步：匹配标签
+        matched_tags = self.process_website_title(
+            url, domain, website_title,
+            str(tracking_id) if tracking_id else None
+        )
+
+        if not matched_tags:
+            return 0
+
+        # 第2步：应用标签
+        return self.apply_website_tags(
+            url, domain, website_title,
+            matched_tags, tracking_id, source_type
+        )
+
+    def process_website_batch(self, websites: List[Dict[str, str]],
+                             batch_commit_size: int = 100) -> Dict[str, int]:
+        """
+        批量处理网站标题进行自动标签（优化版）
+
+        Args:
+            websites: 网站数据列表，每个元素为：
+                {
+                    'url': str,
+                    'domain': str,
+                    'website_title': str,
+                    'tracking_id': str (可选),
+                    'source_id': str (可选)
+                }
+            batch_commit_size: 批量提交大小
+
+        Returns:
+            处理统计信息
+        """
+        stats = {
+            'total_processed': 0,
+            'total_tags_applied': 0,
+            'failed_count': 0
+        }
+
+        if not websites:
+            return stats
+
+        # 预加载所有关键词映射
+        keyword_mappings = self._get_keyword_mappings()
+        if not keyword_mappings:
+            logger.warning("No keyword mappings found")
+            return stats
+
+        logger.info(f"Starting batch processing of {len(websites)} websites")
+
+        for i, website_data in enumerate(websites):
+            try:
+                url = website_data.get('url', '')
+                domain = website_data.get('domain', '')
+                website_title = website_data.get('website_title', '')
+                tracking_id = website_data.get('tracking_id', url)  # 默认使用URL
+                source_id = website_data.get('source_id', tracking_id)
+
+                if not website_title or not website_title.strip():
+                    logger.debug(f"Skipping website with empty title: {url}")
+                    stats['total_processed'] += 1
+                    continue
+
+                # 匹配标签
+                matched_tags = self.process_text_for_tags(
+                    website_title,
+                    tracking_id,
+                    'website_title',
+                    source_id
+                )
+
+                if matched_tags:
+                    # 应用标签
+                    context_data = {
+                        'url': url,
+                        'domain': domain,
+                        'website_title': website_title
+                    }
+
+                    applied = self.apply_website_tags(
+                        url, domain, website_title,
+                        matched_tags, tracking_id, source_id,
+                        commit=False
+                    )
+                    stats['total_tags_applied'] += applied
+
+                stats['total_processed'] += 1
+
+                # 每batch_commit_size条提交一次
+                if (i + 1) % batch_commit_size == 0:
+                    try:
+                        db.session.commit()
+                        logger.info(f"Committed batch at {i + 1}/{len(websites)} websites")
+                    except Exception as e:
+                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}")
+                        db.session.rollback()
+                        stats['failed_count'] += batch_commit_size
+
+            except Exception as e:
+                stats['failed_count'] += 1
+                logger.error(f"Failed to process website {website_data.get('url', 'unknown')}: {str(e)}")
+
+        # 提交剩余记录
+        try:
+            db.session.commit()
+            logger.info(f"Committed final batch of websites")
+        except Exception as e:
+            logger.error(f"Failed to commit final batch: {str(e)}")
+            db.session.rollback()
+
+        logger.info(f"Website batch processing completed: {stats}")
         return stats
 
     def get_statistics(self) -> Dict[str, Any]:

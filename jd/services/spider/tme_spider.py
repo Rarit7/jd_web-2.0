@@ -19,7 +19,6 @@ TmeSpider - 广告追踪系统的核心爬虫服务
 
 import re
 import socket
-import logging
 import time
 from typing import List, Dict, Optional
 from urllib.parse import urlparse, urlunparse
@@ -27,14 +26,24 @@ from urllib.parse import urlparse, urlunparse
 import requests
 from bs4 import BeautifulSoup
 
-logger = logging.getLogger(__name__)
+from jd.utils.logging_config import get_logger, PerformanceLogger
+
+logger = get_logger(__name__, {
+    'component': 'spider',
+    'module': 'tme_spider'
+})
 
 
 class TmeSpider:
     """t.me 链接和广告内容分析爬虫服务"""
 
-    def __init__(self):
-        """初始化爬虫实例"""
+    def __init__(self, check_mainstream=True):
+        """
+        初始化爬虫实例
+
+        Args:
+            check_mainstream: 是否启用主流域名检查（默认启用）
+        """
         self.timeout = 10
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -43,6 +52,10 @@ class TmeSpider:
         # URL 请求缓存（解决性能问题）
         self._url_cache = {}  # {normalized_url: {'data': result, 'timestamp': time}}
         self._cache_ttl = 3600  # 缓存1小时
+
+        # 主流域名检查相关
+        self._check_mainstream = check_mainstream
+        self._mainstream_cache = {}  # {domain: True/False}
 
     # ============================================
     # 1. URL分类与智能处理
@@ -81,6 +94,9 @@ class TmeSpider:
                 'error': str  # 错误信息（如果有）
             }
         """
+        perf_logger = PerformanceLogger()
+        perf_logger.start('classify_and_process_url', url=url)
+
         # 先标准化 URL（解决问题1：URL去重）
         normalized_url = self.normalize_url(url)
 
@@ -88,10 +104,23 @@ class TmeSpider:
         if normalized_url in self._url_cache:
             cache_entry = self._url_cache[normalized_url]
             if time.time() - cache_entry['timestamp'] < self._cache_ttl:
-                logger.debug(f"缓存命中 URL: {normalized_url}")
+                logger.debug("URL 缓存命中", extra={
+                    'extra_fields': {
+                        'url': url,
+                        'normalized_url': normalized_url,
+                        'cache_age': time.time() - cache_entry['timestamp']
+                    }
+                })
+                perf_logger.end(success=True, cache_hit=True)
                 return cache_entry['data']
             else:
                 # 缓存过期，删除
+                logger.debug("URL 缓存已过期", extra={
+                    'extra_fields': {
+                        'normalized_url': normalized_url,
+                        'cache_age': time.time() - cache_entry['timestamp']
+                    }
+                })
                 del self._url_cache[normalized_url]
 
         # 缓存未命中，执行处理
@@ -105,6 +134,14 @@ class TmeSpider:
         }
 
         try:
+            logger.info("开始处理 URL", extra={
+                'extra_fields': {
+                    'url': url,
+                    'url_type': url_type,
+                    'normalized_url': normalized_url
+                }
+            })
+
             if url_type == 'tme':
                 # t.me链接处理
                 # 先分类t.me链接
@@ -154,10 +191,34 @@ class TmeSpider:
                 'data': result,
                 'timestamp': time.time()
             }
-            logger.debug(f"缓存写入 URL: {normalized_url}")
+            logger.debug("URL 写入缓存", extra={
+                'extra_fields': {
+                    'normalized_url': normalized_url,
+                    'url_type': url_type,
+                    'has_error': result.get('error') is not None
+                }
+            })
+
+            logger.info("URL 处理完成", extra={
+                'extra_fields': {
+                    'url': url,
+                    'url_type': url_type,
+                    'has_error': result.get('error') is not None
+                }
+            })
+
+            perf_logger.end(success=True, cache_hit=False, url_type=url_type)
 
         except Exception as e:
-            logger.error(f"URL处理失败: {url}, 类型: {url_type}, 错误: {str(e)}")
+            logger.error("URL 处理失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'url_type': url_type,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
+            perf_logger.end(success=False, error=str(e))
             result['error'] = str(e)
 
         return result
@@ -200,7 +261,16 @@ class TmeSpider:
                 'threat_types': list
             }
         """
+        perf_logger = PerformanceLogger()
+        perf_logger.start('check_phishing_url', url=url)
+
         try:
+            logger.debug("开始钓鱼检测", extra={
+                'extra_fields': {
+                    'url': url
+                }
+            })
+
             # TODO: 实际使用时需要配置 Google Safe Browsing API
             # API密钥需要从 https://developers.google.com/safe-browsing 获取
 
@@ -209,13 +279,32 @@ class TmeSpider:
             # 方案3: PhishTank API (免费但有请求限制)
 
             # 临时返回默认值（实际使用时需要配置API）
-            return {
+            result = {
                 'is_phishing': False,
                 'api_used': 'google_safe_browsing',
                 'threat_types': []
             }
+
+            logger.debug("钓鱼检测完成", extra={
+                'extra_fields': {
+                    'url': url,
+                    'is_phishing': result['is_phishing']
+                }
+            })
+
+            perf_logger.end(success=True, is_phishing=result['is_phishing'])
+            return result
+
         except Exception as e:
-            logger.error(f"钓鱼检测失败: {str(e)}")
+            logger.error("钓鱼检测失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
+            perf_logger.end(success=False, error=str(e))
+
             return {
                 'is_phishing': None,
                 'api_used': 'none',
@@ -251,7 +340,14 @@ class TmeSpider:
                 'ip_location': dict
             }
         """
+        perf_logger = PerformanceLogger()
+        perf_logger.start('get_website_basic_info', url=url)
+
         try:
+            logger.debug("开始获取网站基本信息", extra={
+                'extra_fields': {'url': url}
+            })
+
             # 标准化URL
             if not url.startswith(('http://', 'https://')):
                 url = 'http://' + url
@@ -321,11 +417,17 @@ class TmeSpider:
                             'organization': ip_data.get('org')
                         }
             except (socket.gaierror, requests.RequestException) as e:
-                logger.warning(f"IP地址获取失败: {str(e)}")
+                logger.warning("IP 地址获取失败", extra={
+                    'extra_fields': {
+                        'domain': final_parsed.netloc,
+                        'error_type': type(e).__name__,
+                        'error_message': str(e)
+                    }
+                })
                 ip_address = None
                 ip_location = {'error': str(e)}
 
-            return {
+            result = {
                 'domain': final_parsed.netloc,
                 'title': title,
                 'status_code': response.status_code,
@@ -341,15 +443,227 @@ class TmeSpider:
                 'ip_address': ip_address,
                 'ip_location': ip_location,
             }
+
+            logger.debug("网站基本信息获取完成", extra={
+                'extra_fields': {
+                    'domain': final_parsed.netloc,
+                    'title': title,
+                    'status_code': response.status_code,
+                    'is_short_url': is_short_url,
+                    'redirect_chain_length': len(response.history)
+                }
+            })
+
+            perf_logger.end(success=True, domain=final_parsed.netloc, status_code=response.status_code)
+            return result
+
         except requests.Timeout:
-            logger.error(f"URL请求超时: {url}")
+            logger.error("URL 请求超时", extra={
+                'extra_fields': {
+                    'url': url,
+                    'domain': urlparse(url).netloc
+                }
+            })
+            perf_logger.end(success=False, error='timeout')
             return {'error': 'timeout', 'domain': urlparse(url).netloc}
+
         except requests.RequestException as e:
-            logger.error(f"URL请求失败: {url}, 错误: {str(e)}")
+            logger.error("URL 请求失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'domain': urlparse(url).netloc,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
+            perf_logger.end(success=False, error=str(e))
             return {'error': str(e), 'domain': urlparse(url).netloc}
+
         except Exception as e:
-            logger.error(f"URL处理异常: {url}, 错误: {str(e)}")
+            logger.error("网站信息获取异常", extra={
+                'extra_fields': {
+                    'url': url,
+                    'domain': urlparse(url).netloc,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
+            perf_logger.end(success=False, error=str(e))
             return {'error': f'unexpected: {str(e)}', 'domain': urlparse(url).netloc}
+
+    def _get_certificate_info(self, url: str) -> Dict:
+        """
+        获取网站的 SSL 证书信息
+
+        Args:
+            url: 待分析的URL
+
+        Returns:
+            {
+                'issuer': str,           # 证书颁发者
+                'valid_from': str,       # 证书有效期开始
+                'valid_to': str,         # 证书有效期结束
+                'error': str             # 错误信息（如果有）
+            }
+        """
+        try:
+            import ssl
+            from datetime import datetime
+
+            # 确保使用 https
+            if not url.startswith('https://'):
+                # 尝试转换为 https
+                parsed = urlparse(url)
+                url = f'https://{parsed.netloc}{parsed.path}'
+
+            parsed = urlparse(url)
+            hostname = parsed.hostname or parsed.netloc.split(':')[0]
+
+            # 创建 SSL 上下文
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+
+            # 获取证书信息
+            with context.wrap_socket(socket.socket(), server_hostname=hostname) as sock:
+                try:
+                    sock.connect((hostname, 443))
+                    cert = sock.getpeercert()
+
+                    if cert:
+                        # 解析证书主题
+                        issuer = ''
+                        if 'issuer' in cert:
+                            issuer_tuple = cert['issuer']
+                            if issuer_tuple and len(issuer_tuple) > 0:
+                                issuer_dict = dict(x[0] for x in issuer_tuple)
+                                issuer = issuer_dict.get('organizationName', '')
+
+                        # 解析有效期
+                        valid_from = cert.get('notBefore', '')
+                        valid_to = cert.get('notAfter', '')
+
+                        return {
+                            'issuer': issuer,
+                            'valid_from': valid_from,
+                            'valid_to': valid_to
+                        }
+                except socket.timeout:
+                    return {'error': 'connection_timeout'}
+                except Exception as e:
+                    return {'error': f'certificate_fetch_failed: {str(e)}'}
+        except Exception as e:
+            logger.warning("SSL 证书获取失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            })
+            return {'error': f'ssl_error: {str(e)}'}
+
+    def analyze_url(self, url: str) -> Dict:
+        """
+        综合分析 URL 的详细信息（为广告追踪优化）
+
+        集合了网站基本信息、钓鱼检测、SSL 证书信息和主流域名检查
+
+        Args:
+            url: 待分析的URL
+
+        Returns:
+            {
+                'domain': str,                   # 域名
+                'title': str,                    # 网站标题
+                'status_code': int,              # HTTP 状态码
+                'content_type': str,             # 内容类型
+                'server': str,                   # 服务器信息（从 Content-Type 或其他头提取）
+                'ip_address': str,               # IP 地址
+                'ip_location': dict,             # IP 地理位置信息
+                'is_short_url': bool,            # 是否为短链接
+                'redirect_chain_length': int,    # 重定向链长度
+                'phishing': dict,                # 钓鱼检测结果
+                'certificate': dict,             # SSL 证书信息
+                'is_mainstream': bool or None,   # 是否为主流域名
+                'error': str                     # 错误信息（如果有）
+            }
+        """
+        try:
+            # 1. 获取网站基本信息
+            basic_info = self.get_website_basic_info(url)
+
+            # 2. 检查钓鱼网站
+            phishing_info = self.check_phishing_url(url)
+
+            # 3. 获取 SSL 证书信息
+            cert_info = {}
+            if url.startswith('https://') or url.startswith('http://'):
+                cert_info = self._get_certificate_info(url)
+
+            # 4. 提取 Server 信息（如果可用）
+            server_info = ''
+            # Server 信息可能在 HTTP 响应头中，但 get_website_basic_info 没有返回
+            # 这里设置为空，如需要可在 get_website_basic_info 中增强
+
+            # 5. 检查主流域名
+            domain = basic_info.get('domain')
+            is_mainstream = None
+            if domain:
+                is_mainstream = self._is_mainstream_domain(domain)
+
+            # 6. 合并所有信息
+            result = {
+                'domain': domain,
+                'title': basic_info.get('title'),
+                'status_code': basic_info.get('status_code'),
+                'content_type': basic_info.get('content_type'),
+                'server': server_info,
+                'ip_address': basic_info.get('ip_address'),
+                'ip_location': basic_info.get('ip_location', {}),
+                'is_short_url': basic_info.get('is_short_url', False),
+                'redirect_chain_length': basic_info.get('redirect_chain_length', 0),
+                'phishing': phishing_info,
+                'certificate': cert_info,
+                'is_mainstream': is_mainstream
+            }
+
+            # 如果 basic_info 有错误，添加到结果中
+            if basic_info.get('error'):
+                result['error'] = basic_info.get('error')
+
+            logger.debug("URL 综合分析完成", extra={
+                'extra_fields': {
+                    'url': url,
+                    'domain': domain,
+                    'is_mainstream': is_mainstream,
+                    'status_code': basic_info.get('status_code')
+                }
+            })
+            return result
+
+        except Exception as e:
+            logger.error("URL 综合分析失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
+            return {
+                'error': str(e),
+                'domain': None,
+                'title': None,
+                'status_code': None,
+                'content_type': '',
+                'server': '',
+                'ip_address': None,
+                'ip_location': {},
+                'is_short_url': False,
+                'redirect_chain_length': 0,
+                'phishing': {},
+                'certificate': {},
+                'is_mainstream': None
+            }
 
     # ============================================
     # 2. Telegram账户识别
@@ -430,7 +744,13 @@ class TmeSpider:
             return result
 
         except Exception as e:
-            logger.error(f"Telegram账户分析失败: {account}, 错误: {str(e)}")
+            logger.error("Telegram 账户分析失败", extra={
+                'extra_fields': {
+                    'account': account,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
             return {
                 'account': account,
                 'username': account.lstrip('@'),
@@ -538,7 +858,12 @@ class TmeSpider:
             response = requests.get(tme_url, headers=self.headers, timeout=self.timeout)
 
             if response.status_code != 200:
-                logger.error(f"t.me链接访问失败: {tme_url}, 状态码: {response.status_code}")
+                logger.error("t.me 链接访问失败", extra={
+                    'extra_fields': {
+                        'tme_url': tme_url,
+                        'status_code': response.status_code
+                    }
+                })
                 return {'error': f'HTTP {response.status_code}'}
 
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -588,14 +913,142 @@ class TmeSpider:
             return result
 
         except requests.Timeout:
-            logger.error(f"t.me链接请求超时: {tme_url}")
+            logger.error("t.me 链接请求超时", extra={
+                'extra_fields': {
+                    'tme_url': tme_url
+                }
+            })
             return {'error': 'timeout'}
         except Exception as e:
-            logger.error(f"t.me链接爬取失败: {tme_url}, 错误: {str(e)}")
+            logger.error("t.me 链接爬取失败", extra={
+                'extra_fields': {
+                    'tme_url': tme_url,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
             return {'error': str(e)}
 
     # ============================================
-    # 4. 内容标准化
+    # 4. 主流域名检查（为标签处理服务）
+    # ============================================
+
+    def _is_mainstream_domain(self, domain: str) -> Optional[bool]:
+        """
+        检查域名是否为主流域名
+
+        此方法涉及数据库查询，但作为 Services 层的一部分是合理的，因为：
+        1. Services 层允许进行数据库查询（只要不涉及写入）
+        2. 这个功能可被多个 Job 复用，提高代码复用性
+        3. 与 analyze_url() 紧密相关，都是网站分析的一部分
+
+        Args:
+            domain: 域名
+
+        Returns:
+            True (主流) | False (非主流) | None (无法判断)
+        """
+        if not self._check_mainstream:
+            return None  # 检查未启用
+
+        domain_lower = domain.lower().strip()
+
+        # 检查缓存
+        if domain_lower in self._mainstream_cache:
+            return self._mainstream_cache[domain_lower]
+
+        # 查询数据库（延迟导入，避免循环导入）
+        try:
+            from jd.models.mainstream_domain import MainstreamDomain
+
+            result = MainstreamDomain.query.filter_by(
+                domain=domain_lower,
+                is_active=True
+            ).first()
+
+            is_mainstream = result is not None
+
+            # 缓存结果
+            self._mainstream_cache[domain_lower] = is_mainstream
+            return is_mainstream
+
+        except Exception as e:
+            logger.warning("主流域名检查失败", extra={
+                'extra_fields': {
+                    'domain': domain,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            })
+            return None  # 无法判断时返回 None
+
+    def extract_website_title_for_tagging(self, url: str) -> Dict:
+        """
+        为自动标签处理提取网站标题信息
+
+        此方法用于广告追踪模块中的非主流域名标签处理
+        专注于提取标题和主流域名标记，用于后续的自动标签匹配
+
+        Args:
+            url: 网站URL
+
+        Returns:
+            {
+                'url': str,
+                'domain': str,
+                'title': str,
+                'is_mainstream': bool or None,
+                'error': str or None
+            }
+        """
+        try:
+            analysis = self.analyze_url(url)
+
+            if analysis.get('error'):
+                return {
+                    'url': url,
+                    'domain': analysis.get('domain'),
+                    'title': None,
+                    'is_mainstream': analysis.get('is_mainstream'),
+                    'error': analysis.get('error')
+                }
+
+            title = analysis.get('title')
+            if not title or not title.strip():
+                return {
+                    'url': url,
+                    'domain': analysis.get('domain'),
+                    'title': None,
+                    'is_mainstream': analysis.get('is_mainstream'),
+                    'error': 'No title extracted'
+                }
+
+            return {
+                'url': url,
+                'domain': analysis.get('domain'),
+                'title': title.strip(),
+                'is_mainstream': analysis.get('is_mainstream'),
+                'error': None
+            }
+
+        except Exception as e:
+            logger.error("标题提取失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
+            return {
+                'url': url,
+                'domain': None,
+                'title': None,
+                'is_mainstream': None,
+                'error': str(e)
+            }
+
+    # ============================================
+    # 5. 内容标准化
     # ============================================
 
     def normalize_url(self, url: str) -> str:
@@ -710,7 +1163,13 @@ class TmeSpider:
                 'images': images
             }
         except Exception as e:
-            logger.error(f"Telegraph内容获取失败: {url}, 错误: {str(e)}")
+            logger.error("Telegraph 内容获取失败", extra={
+                'extra_fields': {
+                    'url': url,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e)
+                }
+            }, exc_info=True)
             return {'url': url, 'error': str(e)}
 
     def analyze_telegraph_content(self, content_data: Dict) -> Dict:

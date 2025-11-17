@@ -17,9 +17,9 @@
       "patterns": ["python.*web\\.py", "python.*-m.*web", "flask.*run"],
       "max_cpu": 75,
       "max_memory_mb": 1200,
-      "restart_cmd": "cd /home/ec2-user/workspace/jd_web && bash start.sh -w",
-      "critical": true,
-      "comment": "Flask API 服务器 - 使用较宽松的阈值以适应开发环境"
+      "restart_cmd": "",
+      "critical": false,
+      "comment": "Flask API 服务器 - 禁用自动重启"
     },
     "vite_frontend": {
       "patterns": ["node.*vite", "vite.*dev"],

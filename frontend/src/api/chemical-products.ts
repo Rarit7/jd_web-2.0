@@ -8,7 +8,6 @@ export interface ChemicalProduct {
   seller_name: string
   compound_name: string
   contact_number: string
-  qq_number: string
   status: number  // 0-待处理 1-处理中 2-已处理
   created_at: string
   updated_at: string
@@ -25,7 +24,6 @@ export interface ChemicalProductListParams {
   search_product_name?: string
   search_compound_name?: string
   search_contact_number?: string
-  search_qq_number?: string
   search_platform_id?: number[]
 }
 

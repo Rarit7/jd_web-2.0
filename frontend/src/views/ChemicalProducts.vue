@@ -44,17 +44,9 @@
             />
           </el-form-item>
           <el-form-item label="联系方式:">
-            <el-input 
-              v-model="searchForm.contact_number" 
+            <el-input
+              v-model="searchForm.contact_number"
               placeholder="请输入联系方式"
-              clearable
-              style="width: 200px;"
-            />
-          </el-form-item>
-          <el-form-item label="QQ号码:">
-            <el-input 
-              v-model="searchForm.qq_number" 
-              placeholder="请输入QQ号码"
               clearable
               style="width: 200px;"
             />
@@ -110,13 +102,7 @@
                 <span class="contact-text">{{ row.contact_number }}</span>
               </template>
             </el-table-column>
-            
-            <el-table-column prop="qq_number" label="QQ号码" width="120" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span class="qq-text">{{ row.qq_number }}</span>
-              </template>
-            </el-table-column>
-            
+
             <el-table-column prop="status" label="状态" width="100" align="center">
               <template #default="{ row }">
                 <el-tag :type="getStatusType(row.status)" size="small">
@@ -195,8 +181,7 @@ const searchForm = reactive({
   platform_id: undefined as number | undefined,
   product_name: '',
   compound_name: '',
-  contact_number: '',
-  qq_number: ''
+  contact_number: ''
 })
 
 // 获取数据
@@ -210,7 +195,6 @@ const fetchData = async () => {
       search_product_name: searchForm.product_name || undefined,
       search_compound_name: searchForm.compound_name || undefined,
       search_contact_number: searchForm.contact_number || undefined,
-      search_qq_number: searchForm.qq_number || undefined,
       search_platform_id: searchForm.platform_id ? [searchForm.platform_id] : undefined
     }
     
@@ -260,7 +244,6 @@ const resetSearch = () => {
   searchForm.product_name = ''
   searchForm.compound_name = ''
   searchForm.contact_number = ''
-  searchForm.qq_number = ''
   currentPage.value = 1
   fetchData()
 }
@@ -326,7 +309,6 @@ const downloadData = async () => {
       search_product_name: searchForm.product_name || undefined,
       search_compound_name: searchForm.compound_name || undefined,
       search_contact_number: searchForm.contact_number || undefined,
-      search_qq_number: searchForm.qq_number || undefined,
       search_platform_id: searchForm.platform_id || undefined
     }
     
@@ -519,7 +501,7 @@ onUnmounted(() => {
   color: #606266;
 }
 
-.contact-text, .qq-text {
+.contact-text {
   font-family: 'Courier New', monospace;
   font-size: 12px;
   color: #409eff;

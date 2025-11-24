@@ -24,7 +24,6 @@ def chemical_product_info_list():
     page_size = get_or_exception('page_size', args, 'int', 20)
     search_product_name = get_or_exception('search_product_name', args, 'str', '')
     search_compound_name = get_or_exception('search_compound_name', args, 'str', '')
-    search_qq_number = get_or_exception('search_qq_number', args, 'str', '')
     search_contact_number = get_or_exception('search_contact_number', args, 'str', '')
     search_platform_id_list = args.getlist('search_platform_id', int)
 
@@ -36,8 +35,6 @@ def chemical_product_info_list():
         query = query.filter(ChemicalPlatformProductInfo.product_name.like('%' + search_product_name + '%'))
     if search_compound_name:
         query = query.filter(ChemicalPlatformProductInfo.compound_name.like('%' + search_compound_name + '%'))
-    if search_qq_number:
-        query = query.filter(ChemicalPlatformProductInfo.qq_number == search_qq_number)
     if search_contact_number:
         query = query.filter(ChemicalPlatformProductInfo.contact_number.like('%' + search_contact_number + '%'))
     product_info_list = query.order_by(ChemicalPlatformProductInfo.id.desc()).offset(
@@ -51,7 +48,6 @@ def chemical_product_info_list():
             'compound_name': item.compound_name,
             'seller_name': item.seller_name,
             'contact_number': item.contact_number,
-            'qq_number': item.qq_number,
             'created_at': item.created_at.strftime('%Y-%m-%d %H:%M:%S')
         } for item in product_info_list
     ]
@@ -145,7 +141,6 @@ def get_chemical_products():
     page_size = get_or_exception('page_size', args, 'int', 20)
     search_product_name = get_or_exception('search_product_name', args, 'str', '')
     search_compound_name = get_or_exception('search_compound_name', args, 'str', '')
-    search_qq_number = get_or_exception('search_qq_number', args, 'str', '')
     search_contact_number = get_or_exception('search_contact_number', args, 'str', '')
     search_platform_id_list = args.getlist('search_platform_id', int)
 
@@ -157,8 +152,6 @@ def get_chemical_products():
         query = query.filter(ChemicalPlatformProductInfo.product_name.like('%' + search_product_name + '%'))
     if search_compound_name:
         query = query.filter(ChemicalPlatformProductInfo.compound_name.like('%' + search_compound_name + '%'))
-    if search_qq_number:
-        query = query.filter(ChemicalPlatformProductInfo.qq_number == search_qq_number)
     if search_contact_number:
         query = query.filter(ChemicalPlatformProductInfo.contact_number.like('%' + search_contact_number + '%'))
     
@@ -174,7 +167,6 @@ def get_chemical_products():
         'compound_name': item.compound_name,
         'seller_name': item.seller_name,
         'contact_number': item.contact_number,
-        'qq_number': item.qq_number,
         'status': item.status,
         'created_at': item.created_at.isoformat() if item.created_at else None,
         'updated_at': item.updated_at.isoformat() if item.updated_at else None,
@@ -229,11 +221,10 @@ def download_chemical_products():
         '化合物名称': item.compound_name,
         '商家名称': item.seller_name,
         '联系方式': item.contact_number,
-        'QQ号码': item.qq_number,
     } for item in product_info_list]
 
     # 创建DataFrame
-    columns = ['平台', '产品名称', '化合物名称', '商家名称', '联系方式', 'QQ号码']
+    columns = ['平台', '产品名称', '化合物名称', '商家名称', '联系方式']
     df = pd.DataFrame(data, columns=columns)
 
     # 将DataFrame保存到CSV文件

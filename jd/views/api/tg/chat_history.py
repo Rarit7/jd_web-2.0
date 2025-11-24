@@ -1452,7 +1452,7 @@ def get_document_filename_by_path():
 
 @api.route('/tg/user/stats/<user_id>', methods=['GET'])
 def get_user_stats(user_id):
-    """获取用户聊天统计数据（优化版本 - 合并查询）"""
+    """获取用户聊天统计数据（修复版本 - 分离全局和分组统计）"""
     try:
         # 验证参数
         if not user_id:
@@ -1462,32 +1462,16 @@ def get_user_stats(user_id):
                 'payload': {}
             }), 400
 
-        # 优化：使用单个联合查询同时获取总统计和按群组的统计
-        # 这样可以避免N+1查询问题
-        query_result = db.session.query(
+        # 第一步：获取用户的全局统计数据（总消息数和时间范围）
+        global_stats = db.session.query(
             func.count(TgGroupChatHistory.id).label('total_messages'),
             func.min(TgGroupChatHistory.postal_time).label('first_message_time'),
-            func.max(TgGroupChatHistory.postal_time).label('last_message_time'),
-            TgGroupChatHistory.chat_id,
-            func.count(TgGroupChatHistory.id).over(
-                partition_by=TgGroupChatHistory.chat_id
-            ).label('group_message_count'),
-            func.max(TgGroupChatHistory.postal_time).over(
-                partition_by=TgGroupChatHistory.chat_id
-            ).label('group_last_active_time'),
-            TgGroup.title,
-            TgGroup.name
-        ).outerjoin(
-            TgGroup,
-            (TgGroupChatHistory.chat_id == TgGroup.chat_id) &
-            (TgGroup.status == TgGroup.StatusType.JOIN_SUCCESS)
+            func.max(TgGroupChatHistory.postal_time).label('last_message_time')
         ).filter(
             TgGroupChatHistory.user_id == user_id
-        ).distinct()
+        ).first()
 
-        query_rows = query_result.all()
-
-        if not query_rows:
+        if not global_stats or global_stats.total_messages == 0:
             # 用户没有任何消息
             return jsonify({
                 'err_code': 0,
@@ -1500,36 +1484,49 @@ def get_user_stats(user_id):
                 }
             })
 
-        # 从第一行获取总统计数据（所有行都相同）
-        first_row = query_rows[0]
-        total_messages = first_row.total_messages or 0
-        first_message_time = first_row.first_message_time
-        last_message_time = first_row.last_message_time
+        # 第二步：获取用户所在的所有群组及其统计数据
+        # 按群组分组计数每个群组的消息数和最后活跃时间
+        group_stats = db.session.query(
+            TgGroupChatHistory.chat_id,
+            func.count(TgGroupChatHistory.id).label('group_message_count'),
+            func.max(TgGroupChatHistory.postal_time).label('group_last_active_time'),
+            TgGroup.title,
+            TgGroup.name
+        ).outerjoin(
+            TgGroup,
+            (TgGroupChatHistory.chat_id == TgGroup.chat_id) &
+            (TgGroup.status == TgGroup.StatusType.JOIN_SUCCESS)
+        ).filter(
+            TgGroupChatHistory.user_id == user_id
+        ).group_by(
+            TgGroupChatHistory.chat_id,
+            TgGroup.title,
+            TgGroup.name
+        ).all()
 
-        # 构建群组列表（去重：使用dict保存，以chat_id为key）
-        user_groups_dict = {}
-        for row in query_rows:
-            if row.chat_id and row.title:  # 只处理有效的群组信息
-                user_groups_dict[row.chat_id] = {
+        # 构建群组列表
+        user_groups = []
+        for row in group_stats:
+            if row.chat_id:  # 只处理有有效chat_id的群组
+                user_groups.append({
                     'chat_id': row.chat_id,
-                    'title': row.title,
+                    'title': row.title or row.name,
                     'name': row.name,
-                    'message_count': row.group_message_count,
+                    'message_count': row.group_message_count or 0,
                     'last_active_time': row.group_last_active_time.strftime('%Y-%m-%d %H:%M:%S') if row.group_last_active_time else ''
-                }
+                })
 
         # 按最后活跃时间倒序排列
-        user_groups = sorted(
-            user_groups_dict.values(),
+        user_groups.sort(
             key=lambda x: x['last_active_time'],
             reverse=True
         )
 
         # 格式化统计数据
         stats = {
-            'total_messages': total_messages,
-            'first_message_time': first_message_time.strftime('%Y-%m-%d %H:%M:%S') if first_message_time else '',
-            'last_message_time': last_message_time.strftime('%Y-%m-%d %H:%M:%S') if last_message_time else '',
+            'total_messages': global_stats.total_messages or 0,
+            'first_message_time': global_stats.first_message_time.strftime('%Y-%m-%d %H:%M:%S') if global_stats.first_message_time else '',
+            'last_message_time': global_stats.last_message_time.strftime('%Y-%m-%d %H:%M:%S') if global_stats.last_message_time else '',
             'groups': user_groups
         }
 

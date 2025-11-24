@@ -582,14 +582,18 @@ watch([() => props.userDetail, () => props.userId, () => props.visible],
       localUserDetail.value = null
       return
     }
-    
-    // 加载相关数据
+
+    // 加载相关数据 - 使用Promise.all并行加载以提高性能
     if (currentUserDetail.value) {
-      loadUserStats()
-      loadUserTags()
-      loadUserGroups()
-      loadUserChangeRecords(currentUserDetail.value.user_id)
-      await checkProfileExists(currentUserDetail.value.user_id)
+      const user_id = currentUserDetail.value.user_id
+
+      // 并行执行所有加载操作（除了loadUserTags，它可能有依赖）
+      await Promise.all([
+        loadUserStats(),
+        loadUserTags(),
+        loadUserChangeRecords(user_id),
+        checkProfileExists(user_id)
+      ])
     }
   },
   { immediate: true }
@@ -778,15 +782,16 @@ const removeTag = async (tag: Tag) => {
   }
 }
 
-// 加载用户统计数据
+// 加载用户统计数据（同时包含群组信息）
 const loadUserStats = async () => {
   const userDetail = currentUserDetail.value
   if (!userDetail) return
-  
+
   statsLoading.value = true
+  groupsLoading.value = true
   try {
     const response = await chatHistoryApi.getUserStats(userDetail.user_id)
-    
+
     if (response.data.err_code === 0) {
       const stats = response.data.payload
       userStats.value = {
@@ -794,6 +799,15 @@ const loadUserStats = async () => {
         firstMessageTime: stats.first_message_time || '',
         lastMessageTime: stats.last_message_time || ''
       }
+
+      // 同时处理群组数据（已由API一并返回）
+      userGroups.value = (stats.groups || []).map((group: any) => ({
+        chat_id: group.chat_id,
+        title: group.title || group.name,
+        name: group.name,
+        messageCount: group.message_count || 0,
+        lastActiveTime: group.last_active_time || ''
+      }))
     } else {
       console.error('获取用户统计数据失败:', response.data.err_msg)
       ElMessage.error(response.data.err_msg || '获取用户统计数据失败')
@@ -803,6 +817,7 @@ const loadUserStats = async () => {
     ElMessage.error('加载用户统计数据失败')
   } finally {
     statsLoading.value = false
+    groupsLoading.value = false
   }
 }
 
@@ -850,33 +865,10 @@ const loadUserTags = async () => {
   }
 }
 
-// 加载用户所在群组
-const loadUserGroups = async () => {
-  const userDetail = currentUserDetail.value
-  if (!userDetail) return
-  
-  groupsLoading.value = true
-  try {
-    const response = await chatHistoryApi.getUserStats(userDetail.user_id)
-    
-    if (response.data.err_code === 0) {
-      const stats = response.data.payload
-      userGroups.value = (stats.groups || []).map((group: any) => ({
-        chat_id: group.chat_id,
-        title: group.title || group.name,
-        name: group.name,
-        messageCount: group.message_count || 0,
-        lastActiveTime: group.last_active_time || ''
-      }))
-    } else {
-      console.error('获取用户群组数据失败:', response.data.err_msg)
-    }
-  } catch (error) {
-    console.error('加载用户群组失败:', error)
-  } finally {
-    groupsLoading.value = false
-  }
-}
+// 加载用户所在群组（已由loadUserStats函数提供，此函数已弃用）
+// const loadUserGroups = async () => {
+//   // 群组数据现在通过loadUserStats API返回，无需单独加载
+// }
 
 // 获取用户信息变动记录
 const loadUserChangeRecords = async (user_id: string) => {

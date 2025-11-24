@@ -1452,7 +1452,7 @@ def get_document_filename_by_path():
 
 @api.route('/tg/user/stats/<user_id>', methods=['GET'])
 def get_user_stats(user_id):
-    """获取用户聊天统计数据"""
+    """获取用户聊天统计数据（优化版本 - 合并查询）"""
     try:
         # 验证参数
         if not user_id:
@@ -1461,66 +1461,86 @@ def get_user_stats(user_id):
                 'err_msg': '用户ID不能为空',
                 'payload': {}
             }), 400
-        
-        # 查询用户的聊天统计数据
-        stats_query = db.session.query(
+
+        # 优化：使用单个联合查询同时获取总统计和按群组的统计
+        # 这样可以避免N+1查询问题
+        query_result = db.session.query(
             func.count(TgGroupChatHistory.id).label('total_messages'),
             func.min(TgGroupChatHistory.postal_time).label('first_message_time'),
-            func.max(TgGroupChatHistory.postal_time).label('last_message_time')
-        ).filter(TgGroupChatHistory.user_id == user_id)
-        
-        result = stats_query.first()
-        
-        # 查询用户所在的群组及其消息统计
-        group_stats_query = db.session.query(
+            func.max(TgGroupChatHistory.postal_time).label('last_message_time'),
             TgGroupChatHistory.chat_id,
-            func.count(TgGroupChatHistory.id).label('message_count'),
-            func.max(TgGroupChatHistory.postal_time).label('last_active_time')
-        ).filter(TgGroupChatHistory.user_id == user_id)\
-         .group_by(TgGroupChatHistory.chat_id)\
-         .order_by(func.max(TgGroupChatHistory.postal_time).desc())
-        
-        group_results = group_stats_query.all()
-        
-        # 获取群组信息
-        chat_ids = [gr.chat_id for gr in group_results]
-        groups = {}
-        if chat_ids:
-            group_info = TgGroup.query.filter(
-                TgGroup.chat_id.in_(chat_ids),
-                TgGroup.status == TgGroup.StatusType.JOIN_SUCCESS
-            ).all()
-            groups = {g.chat_id: g for g in group_info}
-        
-        # 构建群组列表
-        user_groups = []
-        for gr in group_results:
-            group = groups.get(gr.chat_id)
-            if group:
-                user_groups.append({
-                    'chat_id': gr.chat_id,
-                    'title': group.title,
-                    'name': group.name,
-                    'message_count': gr.message_count,
-                    'last_active_time': gr.last_active_time.strftime('%Y-%m-%d %H:%M:%S') if gr.last_active_time else ''
-                })
-        
+            func.count(TgGroupChatHistory.id).over(
+                partition_by=TgGroupChatHistory.chat_id
+            ).label('group_message_count'),
+            func.max(TgGroupChatHistory.postal_time).over(
+                partition_by=TgGroupChatHistory.chat_id
+            ).label('group_last_active_time'),
+            TgGroup.title,
+            TgGroup.name
+        ).outerjoin(
+            TgGroup,
+            (TgGroupChatHistory.chat_id == TgGroup.chat_id) &
+            (TgGroup.status == TgGroup.StatusType.JOIN_SUCCESS)
+        ).filter(
+            TgGroupChatHistory.user_id == user_id
+        ).distinct()
+
+        query_rows = query_result.all()
+
+        if not query_rows:
+            # 用户没有任何消息
+            return jsonify({
+                'err_code': 0,
+                'err_msg': '',
+                'payload': {
+                    'total_messages': 0,
+                    'first_message_time': '',
+                    'last_message_time': '',
+                    'groups': []
+                }
+            })
+
+        # 从第一行获取总统计数据（所有行都相同）
+        first_row = query_rows[0]
+        total_messages = first_row.total_messages or 0
+        first_message_time = first_row.first_message_time
+        last_message_time = first_row.last_message_time
+
+        # 构建群组列表（去重：使用dict保存，以chat_id为key）
+        user_groups_dict = {}
+        for row in query_rows:
+            if row.chat_id and row.title:  # 只处理有效的群组信息
+                user_groups_dict[row.chat_id] = {
+                    'chat_id': row.chat_id,
+                    'title': row.title,
+                    'name': row.name,
+                    'message_count': row.group_message_count,
+                    'last_active_time': row.group_last_active_time.strftime('%Y-%m-%d %H:%M:%S') if row.group_last_active_time else ''
+                }
+
+        # 按最后活跃时间倒序排列
+        user_groups = sorted(
+            user_groups_dict.values(),
+            key=lambda x: x['last_active_time'],
+            reverse=True
+        )
+
         # 格式化统计数据
         stats = {
-            'total_messages': result.total_messages or 0,
-            'first_message_time': result.first_message_time.strftime('%Y-%m-%d %H:%M:%S') if result.first_message_time else '',
-            'last_message_time': result.last_message_time.strftime('%Y-%m-%d %H:%M:%S') if result.last_message_time else '',
+            'total_messages': total_messages,
+            'first_message_time': first_message_time.strftime('%Y-%m-%d %H:%M:%S') if first_message_time else '',
+            'last_message_time': last_message_time.strftime('%Y-%m-%d %H:%M:%S') if last_message_time else '',
             'groups': user_groups
         }
-        
+
         return jsonify({
             'err_code': 0,
             'err_msg': '',
             'payload': stats
         })
-        
+
     except Exception as e:
-        logger.error(f'获取用户统计数据失败: {e}')
+        logger.error(f'获取用户统计数据失败: {e}', exc_info=True)
         return jsonify({
             'err_code': 1,
             'err_msg': str(e),

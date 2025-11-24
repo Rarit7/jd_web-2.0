@@ -1,5 +1,6 @@
 from jd.utils.logging_config import get_logger
 import asyncio
+import concurrent.futures
 from typing import Dict, Any, List
 
 from jCelery import celery
@@ -29,12 +30,12 @@ class FetchAccountGroupInfoTask(BaseTask):
     def execute_task(self) -> Dict[str, Any]:
         """
         执行获取账户群组信息的任务
-        
+
         Returns:
             Dict[str, Any]: 任务执行结果
         """
         logger.info(f"开始获取账户 {self.account_id} 的群组信息")
-        
+
         try:
             # 查询账户信息
             tg_account = TgAccount.query.filter(TgAccount.id == self.account_id).first()
@@ -49,7 +50,7 @@ class FetchAccountGroupInfoTask(BaseTask):
                     'account_id': self.account_id,
                     'stats': {}
                 }
-        
+
             if tg_account.status != TgAccount.StatusType.JOIN_SUCCESS:
                 error_msg = f"账户 {tg_account.name} (ID: {self.account_id}) 状态异常，当前状态: {tg_account.status}"
                 logger.error(error_msg)
@@ -74,24 +75,26 @@ class FetchAccountGroupInfoTask(BaseTask):
                     'account_id': self.account_id,
                     'stats': {}
                 }
-            
+
             # 调用群组信息同步方法
-            # 使用 asyncio.run() 来执行异步方法
-            result = asyncio.run(TgGroupInfoManager.sync_group_info_by_account(tg_account.name))
-            
+            # 使用 _run_async_safely 来安全地执行异步方法
+            result = self._run_async_safely(
+                TgGroupInfoManager.sync_group_info_by_account(tg_account.name)
+            )
+
             if result['success']:
                 # 同步成功后，建立账户-群组关系
                 # 传递同步过程中处理的群组chat_id列表
                 processed_chat_ids = result.get('processed_groups', [])
                 session_result = _sync_account_group_sessions(tg_account, processed_chat_ids)
                 result['session_stats'] = session_result
-                
+
                 # 填充tg_group表中缺失的account_id字段
                 fill_result = _fill_missing_account_ids(tg_account, processed_chat_ids)
                 result['fill_account_id_stats'] = fill_result
-                
+
                 logger.info(f"账户 {tg_account.name} 群组信息同步完成: {result['message']}")
-                
+
                 # 设置成功的错误码
                 result['err_code'] = 0
                 result['err_msg'] = ''
@@ -99,14 +102,14 @@ class FetchAccountGroupInfoTask(BaseTask):
                 logger.error(f"账户 {tg_account.name} 群组信息同步失败: {result['message']}")
                 result['err_code'] = 1
                 result['err_msg'] = result['message']
-            
+
             # 添加账户信息到结果中
             result['account_id'] = self.account_id
             result['account_name'] = tg_account.name
             result['account_user_id'] = tg_account.user_id
-            
+
             return result
-            
+
         except Exception as e:
             error_msg = f"获取账户 {self.account_id} 群组信息时发生异常: {str(e)}"
             logger.error(error_msg)
@@ -119,6 +122,34 @@ class FetchAccountGroupInfoTask(BaseTask):
                 'account_name': '',
                 'stats': {}
             }
+
+    @staticmethod
+    def _run_async_safely(coro):
+        """
+        安全地运行异步协程
+        处理事件循环可能已存在的情况（在Celery worker中）
+
+        Returns:
+            异步协程的执行结果
+        """
+        try:
+            # 尝试获取当前事件循环
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行的事件循环，创建一个新的
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+        else:
+            # 已有运行的事件循环，直接运行
+            # 这种情况下，我们需要在线程中运行（避免冲突）
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
 
 
 @celery.task
@@ -347,11 +378,13 @@ def fetch_all_accounts_group_info() -> Dict[str, Any]:
     """
     获取所有成功登录账户的群组信息
 
+    Note: 这是一个串行处理任务，逐个处理账户以避免资源冲突
+
     Returns:
         Dict[str, Any]: 批量任务执行结果
     """
     logger.info("开始批量获取所有账户的群组信息")
-    
+
     result = {
         'success': True,
         'message': '',
@@ -360,32 +393,36 @@ def fetch_all_accounts_group_info() -> Dict[str, Any]:
         'failed_accounts': 0,
         'account_results': []
     }
-    
+
     try:
         # 查询所有成功登录的账户
         accounts = TgAccount.query.filter_by(status=TgAccount.StatusType.JOIN_SUCCESS).all()
         result['total_accounts'] = len(accounts)
-        
+
         logger.info(f"找到 {len(accounts)} 个已成功登录的账户")
-        
+
         for account in accounts:
             try:
                 logger.info(f"处理账户: {account.name} (ID: {account.id})")
-                account_result = fetch_account_group_info.apply(args=[account.id]).get()
-                
+
+                # 直接调用任务函数，而不使用apply().get()
+                # 这避免了Celery中不允许的阻塞操作
+                task = FetchAccountGroupInfoTask(account.id)
+                account_result = task.start_task()
+
                 result['account_results'].append(account_result)
-                
-                if account_result['success']:
+
+                if account_result.get('success', False):
                     result['success_accounts'] += 1
                     logger.info(f"账户 {account.name} 处理成功")
                 else:
                     result['failed_accounts'] += 1
-                    logger.warning(f"账户 {account.name} 处理失败: {account_result['message']}")
-                
+                    logger.warning(f"账户 {account.name} 处理失败: {account_result.get('message', 'Unknown error')}")
+
             except Exception as e:
                 error_msg = f"处理账户 {account.name} (ID: {account.id}) 时发生异常: {str(e)}"
                 logger.error(error_msg)
-                
+
                 result['failed_accounts'] += 1
                 result['account_results'].append({
                     'success': False,
@@ -393,18 +430,18 @@ def fetch_all_accounts_group_info() -> Dict[str, Any]:
                     'account_id': account.id,
                     'account_name': account.name
                 })
-        
+
         # 生成汇总信息
         result['message'] = f"批量处理完成: 总计 {result['total_accounts']} 个账户, " \
                            f"成功 {result['success_accounts']} 个, " \
                            f"失败 {result['failed_accounts']} 个"
-        
+
         logger.info(result['message'])
-        
+
     except Exception as e:
         result['success'] = False
         result['message'] = f"批量获取群组信息失败: {str(e)}"
         logger.error(result['message'])
-    
+
     return result
 

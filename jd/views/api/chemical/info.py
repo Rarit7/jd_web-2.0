@@ -43,7 +43,7 @@ def chemical_product_info_list():
     data = [
         {
             'id': item.id,
-            'platform_name': ChemicalPlatformService.PLATFORM_MAP[item.platform_id],
+            'platform_name': ChemicalPlatformService.PLATFORM_MAP.get(item.platform_id, '未知平台'),
             'product_name': item.product_name,
             'compound_name': item.compound_name,
             'seller_name': item.seller_name,

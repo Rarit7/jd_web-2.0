@@ -1,5 +1,8 @@
 import asyncio
+from telethon import errors
 
+from jd import db
+from jd.models.tg_group import TgGroup
 from jd.models.tg_group_status import TgGroupStatus
 from jd.jobs.tg_base_history_fetcher import BaseTgHistoryFetcher
 from jd.utils.logging_config import get_logger
@@ -16,7 +19,141 @@ class ExsitedGroupHistoryFetcher(BaseTgHistoryFetcher):
     def __init__(self):
         super().__init__()
 
-    
+
+    def _is_temporary_error(self, exception) -> bool:
+        """
+        判断异常是否为临时性错误（需要重试）
+
+        Args:
+            exception: 捕获的异常
+
+        Returns:
+            bool: True表示临时错误，False表示永久失效
+        """
+        exception_type = type(exception).__name__
+
+        # 临时错误列表（可重试）
+        temporary_errors = [
+            'PeerFloodError',        # Telegram速率限制
+            'FloodError',            # 一般洪泛保护
+            'SlowModeWaitError',     # 慢速模式
+            'ConnectionError',       # 网络连接错误
+            'TimeoutError',          # 超时
+            'OSError',               # 操作系统级错误（包括网络）
+        ]
+
+        # 检查异常是否在临时错误列表中
+        if exception_type in temporary_errors:
+            return True
+
+        # 检查异常消息中是否包含临时错误特征
+        error_message = str(exception).lower()
+        temporary_keywords = [
+            'timeout',
+            'connection',
+            'temporarily',
+            'temporarily unavailable',
+            'temporarily blocked'
+        ]
+
+        for keyword in temporary_keywords:
+            if keyword in error_message:
+                return True
+
+        return False
+
+
+    def _mark_group_as_deleted(self, chat_id: int, group_name: str, reason: str):
+        """
+        将群组标记为失效状态（INVALID_LINK）
+
+        Args:
+            chat_id: 群组ID
+            group_name: 群组名称
+            reason: 标记原因
+        """
+        try:
+            chat_id_str = str(chat_id)
+            group = TgGroup.query.filter_by(chat_id=chat_id_str).first()
+
+            if not group:
+                logger.warning(f'增量聊天记录获取|{group_name}|标记失效失败|群组记录不存在')
+                return
+
+            # 只有当前状态是JOIN_SUCCESS时才更新为INVALID_LINK
+            if group.status == TgGroup.StatusType.JOIN_SUCCESS:
+                group.status = TgGroup.StatusType.INVALID_LINK
+                db.session.commit()
+                logger.info(f'增量聊天记录获取|{group_name}|已标记为失效|chat_id={chat_id}，原因: {reason}')
+            else:
+                logger.info(f'增量聊天记录获取|{group_name}|群组状态已变更|当前状态={group.status}，不再标记为失效')
+
+        except Exception as e:
+            logger.error(f'增量聊天记录获取|{group_name}|标记群组失效失败: {e}')
+            if db.session.in_transaction():
+                try:
+                    db.session.rollback()
+                except Exception as rollback_error:
+                    logger.error(f'增量聊天记录获取|{group_name}|事务回滚失败: {rollback_error}')
+
+
+    async def _retry_fetch_with_backoff(self, chat_id: int, group_name: str, max_retries: int = 3) -> tuple[bool, int]:
+        """
+        使用指数退避重试获取群组数据
+
+        Args:
+            chat_id: 群组ID
+            group_name: 群组名称
+            max_retries: 最大重试次数
+
+        Returns:
+            tuple[bool, int]: (是否成功, 新增消息数)
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f'增量聊天记录获取|{group_name}|临时错误重试|第{attempt}次重试')
+
+                # 指数退避延迟
+                delay = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                await asyncio.sleep(delay)
+
+                # 重新获取dialog
+                chat, actual_chat_id = await self.get_dialog_with_retry(chat_id, group_name)
+                if not chat:
+                    logger.warning(f'增量聊天记录获取|{group_name}|第{attempt}次重试|Dialog获取失败')
+                    continue
+
+                # 尝试获取消息
+                param = {
+                    "limit": 100,
+                    "reverse": False
+                }
+
+                batch_messages = []
+                async for data in self.tg.scan_message(chat, **param):
+                    batch_messages.append(data)
+                    if len(batch_messages) >= 100:
+                        break
+
+                # 处理获取到的消息
+                if batch_messages:
+                    batch_saved_count = await self.process_message_batch(batch_messages, actual_chat_id, 1)
+                    self.update_group_status(actual_chat_id)
+                    logger.info(f'增量聊天记录获取|{group_name}|重试成功|获取并保存 {batch_saved_count} 条消息')
+                    return True, batch_saved_count
+                else:
+                    logger.info(f'增量聊天记录获取|{group_name}|重试成功|无新消息')
+                    return True, 0
+
+            except Exception as e:
+                if attempt == max_retries:
+                    logger.warning(f'增量聊天记录获取|{group_name}|第{attempt}次重试失败|所有重试都失败了: {e}')
+                else:
+                    logger.warning(f'增量聊天记录获取|{group_name}|第{attempt}次重试失败|将继续重试: {e}')
+
+        return False, 0
+
+
     # 从tg_group_status获取last_record_id作为min_id
     # 如果没有last_record_id记录，则返回-1
     def get_min_id(self, chat_id):
@@ -128,15 +265,33 @@ class ExsitedGroupHistoryFetcher(BaseTgHistoryFetcher):
                 await asyncio.sleep(0.5)
             
             logger.info(f'增量聊天记录获取|{group_name}|任务完成：获取条数 {total_saved_count} ')
-            
+
             # 更新群组状态
             self.update_group_status(chat_id)
-            
+
             return True, total_saved_count
-            
+
         except Exception as e:
-            logger.error(f'增量聊天记录获取|{group_name}|错误: {e}')
-            return False, 0
+            logger.error(f'增量聊天记录获取|{group_name}|异常发生: {type(e).__name__}: {e}')
+
+            # 判断是否为临时错误
+            if self._is_temporary_error(e):
+                logger.warning(f'增量聊天记录获取|{group_name}|临时错误检测|错误类型={type(e).__name__}，尝试重试')
+
+                # 尝试重试
+                success, message_count = await self._retry_fetch_with_backoff(chat_id, group_name, max_retries=3)
+                if success:
+                    logger.info(f'增量聊天记录获取|{group_name}|重试恢复|最终获取 {message_count} 条消息')
+                    return True, message_count
+                else:
+                    logger.warning(f'增量聊天记录获取|{group_name}|临时错误重试失败|但仍继续处理其他群组')
+                    # 临时错误重试失败后不标记为INVALID_LINK，允许后续重试
+                    return False, 0
+            else:
+                # 永久失效或未知错误：标记群组为失效
+                logger.error(f'增量聊天记录获取|{group_name}|永久失效|将标记为INVALID_LINK')
+                self._mark_group_as_deleted(chat_id, group_name, f'增量获取异常: {type(e).__name__}')
+                return False, 0
     
 
     async def process_all_groups(self) -> tuple[bool, dict]:
@@ -203,28 +358,34 @@ class ExsitedGroupHistoryFetcher(BaseTgHistoryFetcher):
                         'new_messages_count': new_messages_count
                     })
                 else:
+                    # fetch_group_new_data 返回 False，可能已标记为失效，或者是临时错误
                     error_groups.append({
                         'group_name': group_name,
                         'chat_id': chat_id,
                         'session_names': session_names,
                         'error': 'fetch_group_new_data返回False'
                     })
-                    
+
             except Exception as e:
-                logger.error(f'处理群组 {group_name} 时发生错误: {e}')
+                logger.error(f'增量聊天记录获取|{group_name}|进程异常: {type(e).__name__}: {e}')
+
+                # 记录异常但继续处理其他群组
                 error_groups.append({
                     'group_name': group_name,
                     'chat_id': chat_id,
                     'session_names': session_names,
-                    'error': str(e)
+                    'error': f'{type(e).__name__}: {str(e)}'
                 })
-                # 出现异常时关闭当前连接，强制下一个群组重新初始化
-                if hasattr(self, 'tg') and self.tg:
-                    try:
-                        await self.close_telegram_service()
-                        current_session_names = None  # 重置session状态
-                    except Exception as close_error:
-                        logger.error(f'异常处理中关闭Telegram服务失败: {close_error}')
+
+                # 如果是临时错误，保持连接；如果是永久失效，关闭连接强制重新初始化
+                if not self._is_temporary_error(e):
+                    logger.error(f'增量聊天记录获取|{group_name}|进程异常为非临时错误，关闭连接进行重新初始化')
+                    if hasattr(self, 'tg') and self.tg:
+                        try:
+                            await self.close_telegram_service()
+                            current_session_names = None  # 重置session状态
+                        except Exception as close_error:
+                            logger.error(f'增量聊天记录获取|{group_name}|异常处理中关闭Telegram服务失败: {close_error}')
         
         # 最后关闭连接
         if hasattr(self, 'tg') and self.tg:

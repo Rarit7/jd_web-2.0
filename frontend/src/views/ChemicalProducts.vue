@@ -85,7 +85,7 @@
               </template>
             </el-table-column>
             
-            <el-table-column prop="compound_name" label="化合物名称" min-width="180" show-overflow-tooltip>
+            <el-table-column prop="compound_name" label="化合物名称/CAS编号" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <span class="compound-text">{{ row.compound_name }}</span>
               </template>

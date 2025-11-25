@@ -15,6 +15,8 @@ class ChemicalPlatformService:
     PLATFORM_HUAYUAN = 5  # 化源
     PLATFORM_ICHEMISTRY = 6  # 爱化学
     PLATFORM_CHEMBK = 7  # chembk
+    PLATFORM_CHEMNET = 8  # chemnet
+    PLATFORM_LOOKCHEM = 9  # lookchem
 
     PLATFORM_MAP = {
         PLATFORM_MOLBASE: '摩贝',
@@ -23,7 +25,9 @@ class ChemicalPlatformService:
         PLATFORM_CHEMICALNINE: 'chemical960',
         PLATFORM_HUAYUAN: '化源',
         PLATFORM_ICHEMISTRY: '爱化学',
-        PLATFORM_CHEMBK: 'checmbk'
+        PLATFORM_CHEMBK: 'checmbk',
+        PLATFORM_CHEMNET: 'chemnet',
+        PLATFORM_LOOKCHEM: 'lookchem'
 
     }
 

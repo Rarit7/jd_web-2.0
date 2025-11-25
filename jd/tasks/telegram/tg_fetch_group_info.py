@@ -37,7 +37,7 @@ class FetchAccountGroupInfoTask(BaseTask):
         logger.info(f"开始获取账户 {self.account_id} 的群组信息")
 
         try:
-            # 查询账户信息
+            # 查询账户信息并立即转换为 DTO（字典），避免 ORM 会话分离问题
             tg_account = TgAccount.query.filter(TgAccount.id == self.account_id).first()
             if not tg_account:
                 error_msg = f"账户 {self.account_id} 不存在"
@@ -76,37 +76,46 @@ class FetchAccountGroupInfoTask(BaseTask):
                     'stats': {}
                 }
 
+            # 立即将 ORM 对象转换为 DTO，提取需要的字段
+            account_dto = {
+                'id': tg_account.id,
+                'name': tg_account.name,
+                'user_id': tg_account.user_id,
+                'status': tg_account.status
+            }
+
             # 调用群组信息同步方法
             # 使用 _run_async_safely 来安全地执行异步方法
+            # 传递 account_dto 而不是 ORM 对象
             result = self._run_async_safely(
-                TgGroupInfoManager.sync_group_info_by_account(tg_account.name)
+                TgGroupInfoManager.sync_group_info_by_account(account_dto['name'])
             )
 
             if result['success']:
                 # 同步成功后，建立账户-群组关系
                 # 传递同步过程中处理的群组chat_id列表
                 processed_chat_ids = result.get('processed_groups', [])
-                session_result = _sync_account_group_sessions(tg_account, processed_chat_ids)
+                session_result = _sync_account_group_sessions(account_dto, processed_chat_ids)
                 result['session_stats'] = session_result
 
                 # 填充tg_group表中缺失的account_id字段
-                fill_result = _fill_missing_account_ids(tg_account, processed_chat_ids)
+                fill_result = _fill_missing_account_ids(account_dto, processed_chat_ids)
                 result['fill_account_id_stats'] = fill_result
 
-                logger.info(f"账户 {tg_account.name} 群组信息同步完成: {result['message']}")
+                logger.info(f"账户 {account_dto['name']} 群组信息同步完成: {result['message']}")
 
                 # 设置成功的错误码
                 result['err_code'] = 0
                 result['err_msg'] = ''
             else:
-                logger.error(f"账户 {tg_account.name} 群组信息同步失败: {result['message']}")
+                logger.error(f"账户 {account_dto['name']} 群组信息同步失败: {result['message']}")
                 result['err_code'] = 1
                 result['err_msg'] = result['message']
 
             # 添加账户信息到结果中
             result['account_id'] = self.account_id
-            result['account_name'] = tg_account.name
-            result['account_user_id'] = tg_account.user_id
+            result['account_name'] = account_dto['name']
+            result['account_user_id'] = account_dto['user_id']
 
             return result
 
@@ -169,14 +178,14 @@ def fetch_account_group_info(account_id: int) -> Dict[str, Any]:
     
 
 
-def _fill_missing_account_ids(tg_account: TgAccount, processed_chat_ids: List[str] = None) -> Dict[str, Any]:
+def _fill_missing_account_ids(account_dto: Dict[str, Any], processed_chat_ids: List[str] = None) -> Dict[str, Any]:
     """
     填充tg_group表中缺失的account_id字段
-    
+
     Args:
-        tg_account (TgAccount): TG账户对象
+        account_dto (Dict[str, Any]): TG账户数据（字典，包含 id, name, user_id 等）
         processed_chat_ids (List[str]): 要处理的群组chat_id列表，如果为None或空列表则处理所有群组
-        
+
     Returns:
         Dict[str, Any]: 填充统计结果
     """
@@ -186,9 +195,9 @@ def _fill_missing_account_ids(tg_account: TgAccount, processed_chat_ids: List[st
         'already_filled': 0,
         'errors': []
     }
-    
+
     try:
-        logger.info(f"开始填充账户 {tg_account.name} 关联群组的account_id字段")
+        logger.info(f"开始填充账户 {account_dto['name']} 关联群组的account_id字段")
         
         # 构建查询条件
         if processed_chat_ids:
@@ -220,9 +229,9 @@ def _fill_missing_account_ids(tg_account: TgAccount, processed_chat_ids: List[st
                     continue
                 
                 # 填充account_id为当前账户的TG数字ID
-                group.account_id = tg_account.user_id
+                group.account_id = account_dto['user_id']
                 stats['filled_groups'] += 1
-                logger.info(f"填充群组 {group.name} (chat_id={group.chat_id}) 的account_id为: {tg_account.user_id}")
+                logger.info(f"填充群组 {group.name} (chat_id={group.chat_id}) 的account_id为: {account_dto['user_id']}")
                 
             except Exception as e:
                 error_msg = f"填充群组account_id失败 chat_id={group.chat_id}: {str(e)}"
@@ -234,28 +243,28 @@ def _fill_missing_account_ids(tg_account: TgAccount, processed_chat_ids: List[st
             db.session.commit()
             logger.info(f"成功填充了 {stats['filled_groups']} 个群组的account_id")
         
-        logger.info(f"账户 {tg_account.name} account_id填充完成: "
+        logger.info(f"账户 {account_dto['name']} account_id填充完成: "
                    f"总计 {stats['total_groups']} 个群组, "
                    f"填充 {stats['filled_groups']} 个, "
                    f"已存在 {stats['already_filled']} 个")
-        
+
     except Exception as e:
-        error_msg = f"填充账户 {tg_account.name} 群组account_id时发生异常: {str(e)}"
+        error_msg = f"填充账户 {account_dto['name']} 群组account_id时发生异常: {str(e)}"
         logger.error(error_msg)
         stats['errors'].append(error_msg)
         db.session.rollback()
-    
+
     return stats
 
 
-def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List[str] = None) -> Dict[str, Any]:
+def _sync_account_group_sessions(account_dto: Dict[str, Any], processed_chat_ids: List[str] = None) -> Dict[str, Any]:
     """
     同步账户-群组会话关系到tg_group_session表
-    
+
     Args:
-        tg_account (TgAccount): TG账户对象
+        account_dto (Dict[str, Any]): TG账户数据（字典，包含 id, name, user_id 等）
         processed_chat_ids (List[str]): 要处理的群组chat_id列表，如果为None或空列表则跳过处理
-        
+
     Returns:
         Dict[str, Any]: 同步统计结果
     """
@@ -267,9 +276,9 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
         'merged_duplicate_sessions': 0,
         'errors': []
     }
-    
+
     try:
-        logger.info(f"开始同步账户 {tg_account.name} 的群组会话关系")
+        logger.info(f"开始同步账户 {account_dto['name']} 的群组会话关系")
         
         # 如果没有提供processed_chat_ids或列表为空，直接返回
         if not processed_chat_ids:
@@ -299,7 +308,7 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
                 if empty_user_session:
                     # 在修复前，检查修复后是否会与现有记录重复
                     potential_duplicate = TgGroupSession.query.filter_by(
-                        user_id=tg_account.user_id,
+                        user_id=account_dto['user_id'],
                         chat_id=group.chat_id
                     ).first()
 
@@ -307,50 +316,50 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
                         # 如果修复后会重复，删除空记录，保留正常记录
                         db.session.delete(empty_user_session)
                         # 更新正常记录的session_name（如果需要）
-                        if potential_duplicate.session_name != tg_account.name:
-                            potential_duplicate.session_name = tg_account.name
+                        if potential_duplicate.session_name != account_dto['name']:
+                            potential_duplicate.session_name = account_dto['name']
                         db.session.commit()
 
                         stats['merged_duplicate_sessions'] += 1
-                        logger.info(f"删除空user_id记录并保留正常记录: chat_id={group.chat_id}, user_id={tg_account.user_id}")
+                        logger.info(f"删除空user_id记录并保留正常记录: chat_id={group.chat_id}, user_id={account_dto['user_id']}")
                     else:
                         # 修复空user_id记录
-                        empty_user_session.user_id = tg_account.user_id
-                        empty_user_session.session_name = tg_account.name
+                        empty_user_session.user_id = account_dto['user_id']
+                        empty_user_session.session_name = account_dto['name']
                         db.session.commit()
 
                         stats['updated_empty_sessions'] += 1
-                        logger.info(f"修复空user_id记录: chat_id={group.chat_id}, 设置user_id={tg_account.user_id}, session_name={tg_account.name}")
+                        logger.info(f"修复空user_id记录: chat_id={group.chat_id}, 设置user_id={account_dto['user_id']}, session_name={account_dto['name']}")
 
                     continue
 
                 # 检查是否已存在正常的会话记录
                 existing_session = TgGroupSession.query.filter_by(
-                    user_id=tg_account.user_id,
+                    user_id=account_dto['user_id'],
                     chat_id=group.chat_id
                 ).first()
 
                 if existing_session:
                     # 更新会话名称（如果不同）
-                    if existing_session.session_name != tg_account.name:
-                        existing_session.session_name = tg_account.name
+                    if existing_session.session_name != account_dto['name']:
+                        existing_session.session_name = account_dto['name']
                         db.session.commit()
-                        logger.debug(f"更新会话名称: chat_id={group.chat_id}, session_name={tg_account.name}")
+                        logger.debug(f"更新会话名称: chat_id={group.chat_id}, session_name={account_dto['name']}")
 
                     stats['existing_sessions'] += 1
                 else:
                     # 创建新的会话记录
                     new_session = TgGroupSession(
-                        user_id=tg_account.user_id,
+                        user_id=account_dto['user_id'],
                         chat_id=group.chat_id,
-                        session_name=tg_account.name
+                        session_name=account_dto['name']
                     )
 
                     db.session.add(new_session)
                     db.session.commit()
 
                     stats['new_sessions'] += 1
-                    logger.info(f"创建新会话记录: user_id={tg_account.user_id}, chat_id={group.chat_id}, session_name={tg_account.name}")
+                    logger.info(f"创建新会话记录: user_id={account_dto['user_id']}, chat_id={group.chat_id}, session_name={account_dto['name']}")
 
             except Exception as e:
                 error_msg = f"处理群组会话失败 chat_id={group.chat_id}: {str(e)}"
@@ -358,18 +367,18 @@ def _sync_account_group_sessions(tg_account: TgAccount, processed_chat_ids: List
                 stats['errors'].append(error_msg)
                 db.session.rollback()
         
-        logger.info(f"账户 {tg_account.name} 会话关系同步完成: "
+        logger.info(f"账户 {account_dto['name']} 会话关系同步完成: "
                    f"总计 {stats['total_groups']} 个群组, "
                    f"新增 {stats['new_sessions']} 个会话, "
                    f"已存在 {stats['existing_sessions']} 个会话, "
                    f"修复空user_id记录 {stats['updated_empty_sessions']} 个, "
                    f"合并重复记录 {stats['merged_duplicate_sessions']} 个")
-        
+
     except Exception as e:
-        error_msg = f"同步账户 {tg_account.name} 会话关系时发生异常: {str(e)}"
+        error_msg = f"同步账户 {account_dto['name']} 会话关系时发生异常: {str(e)}"
         logger.error(error_msg)
         stats['errors'].append(error_msg)
-    
+
     return stats
 
 
@@ -379,6 +388,7 @@ def fetch_all_accounts_group_info() -> Dict[str, Any]:
     获取所有成功登录账户的群组信息
 
     Note: 这是一个串行处理任务，逐个处理账户以避免资源冲突
+    使用 DTO 模式避免 SQLAlchemy 会话分离错误
 
     Returns:
         Dict[str, Any]: 批量任务执行结果
@@ -395,40 +405,50 @@ def fetch_all_accounts_group_info() -> Dict[str, Any]:
     }
 
     try:
-        # 查询所有成功登录的账户
-        accounts = TgAccount.query.filter_by(status=TgAccount.StatusType.JOIN_SUCCESS).all()
-        result['total_accounts'] = len(accounts)
+        # 步骤 1: 查询所有成功登录的账户并立即转换为 DTO（字典）
+        # 这避免了后续操作中 ORM 对象的会话分离问题
+        account_dtos = [
+            {
+                'id': acc.id,
+                'name': acc.name,
+                'user_id': acc.user_id,
+                'status': acc.status
+            }
+            for acc in TgAccount.query.filter_by(status=TgAccount.StatusType.JOIN_SUCCESS).all()
+        ]
+        result['total_accounts'] = len(account_dtos)
 
-        logger.info(f"找到 {len(accounts)} 个已成功登录的账户")
+        logger.info(f"找到 {len(account_dtos)} 个已成功登录的账户")
 
-        for account in accounts:
+        # 步骤 2: 使用 DTO 处理，不依赖 ORM 对象
+        for account_dto in account_dtos:
             try:
-                logger.info(f"处理账户: {account.name} (ID: {account.id})")
+                logger.info(f"处理账户: {account_dto['name']} (ID: {account_dto['id']})")
 
                 # 直接调用任务函数，而不使用apply().get()
                 # 这避免了Celery中不允许的阻塞操作
-                task = FetchAccountGroupInfoTask(account.id)
+                task = FetchAccountGroupInfoTask(account_dto['id'])
                 account_result = task.start_task()
 
                 result['account_results'].append(account_result)
 
                 if account_result.get('success', False):
                     result['success_accounts'] += 1
-                    logger.info(f"账户 {account.name} 处理成功")
+                    logger.info(f"账户 {account_dto['name']} 处理成功")
                 else:
                     result['failed_accounts'] += 1
-                    logger.warning(f"账户 {account.name} 处理失败: {account_result.get('message', 'Unknown error')}")
+                    logger.warning(f"账户 {account_dto['name']} 处理失败: {account_result.get('message', 'Unknown error')}")
 
             except Exception as e:
-                error_msg = f"处理账户 {account.name} (ID: {account.id}) 时发生异常: {str(e)}"
+                error_msg = f"处理账户 {account_dto['name']} (ID: {account_dto['id']}) 时发生异常: {str(e)}"
                 logger.error(error_msg)
 
                 result['failed_accounts'] += 1
                 result['account_results'].append({
                     'success': False,
                     'message': error_msg,
-                    'account_id': account.id,
-                    'account_name': account.name
+                    'account_id': account_dto['id'],
+                    'account_name': account_dto['name']
                 })
 
         # 生成汇总信息

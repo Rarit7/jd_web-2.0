@@ -311,6 +311,7 @@ class AdTrackingJob:
                         existing.extra_info.update(tracking_data['extra_info'])
                     else:
                         existing.extra_info = tracking_data['extra_info']
+                db.session.commit()
                 logger.debug("更新已有追踪记录", extra={
                     'extra_fields': {
                         'tracking_id': existing.id,
@@ -335,16 +336,19 @@ class AdTrackingJob:
                     occurrence_count=1
                 )
                 db.session.add(new_tracking)
+                db.session.commit()
                 logger.debug("创建新追踪记录", extra={
                     'extra_fields': {
                         'content': tracking_data['content'],
                         'content_type': tracking_data['content_type'],
-                        'source_type': tracking_data['source_type']
+                        'source_type': tracking_data['source_type'],
+                        'tracking_id': new_tracking.id
                     }
                 })
                 return new_tracking
 
         except Exception as e:
+            db.session.rollback()
             logger.error("保存追踪记录失败", extra={
                 'extra_fields': {
                     'error_type': type(e).__name__,
@@ -391,8 +395,10 @@ class AdTrackingJob:
                         })
 
                 # 同时应用到用户（复用现有自动标签系统）
+                # 注：不提交，由调用方统一处理提交
                 self.auto_tagging_service.apply_auto_tags(
-                    user_id, matched_tags, 'ad_tracking', str(tracking_id)
+                    user_id, matched_tags, 'ad_tracking', str(tracking_id),
+                    commit=False
                 )
 
         except Exception as e:
@@ -786,7 +792,8 @@ class AdTrackingJob:
                     }, exc_info=True)
                     result['errors'] += 1
 
-            # 提交数据库
+            # 注：追踪记录已在各个处理方法中逐条提交
+            # 这里只提交自动标签相关的改动
             db.session.commit()
             result['status'] = 'success'
 
@@ -886,7 +893,7 @@ class AdTrackingJob:
                         }, exc_info=True)
                         result['errors'] += 1
 
-                # 提交当前批次
+                # 注：追踪记录已在各处理方法中逐条提交，这里只提交自动标签相关改动
                 db.session.commit()
                 chat_offset += batch_size
                 batch_count += 1
@@ -930,6 +937,7 @@ class AdTrackingJob:
                         }, exc_info=True)
                         result['errors'] += 1
 
+                # 注：追踪记录已在各处理方法中逐条提交，这里只提交自动标签相关改动
                 db.session.commit()
                 user_offset += batch_size
                 logger.info("用户信息批量处理进度", extra={
@@ -969,6 +977,7 @@ class AdTrackingJob:
                         }, exc_info=True)
                         result['errors'] += 1
 
+                # 注：追踪记录已在各处理方法中逐条提交，这里只提交自动标签相关改动
                 db.session.commit()
                 group_offset += batch_size
                 logger.info("群组信息批量处理进度", extra={

@@ -66,6 +66,10 @@ class AutoTaggingService:
 
         Returns:
             匹配到的标签信息列表
+
+        说明：
+            本方法只进行文本匹配，不负责去重。
+            重复检查由调用方在批处理中统一处理，避免N+1查询。
         """
         if not text or not text.strip():
             return []
@@ -79,33 +83,19 @@ class AutoTaggingService:
             matches = self._matcher_cache.match_keywords(text, keyword_mappings)
 
             for match in matches:
-                # 检查是否已经有此标签，避免重复
-                existing_log = AutoTagLog.query.filter_by(
-                    tg_user_id=user_id,
-                    tag_id=match['tag_id']
-                ).first()
-
-                if not existing_log:
-                    matched_tags.append(match)
-                    logger.debug(f"Matched keyword '{match['keyword']}' for user {user_id}")
+                matched_tags.append(match)
+                logger.debug(f"Matched keyword '{match['keyword']}' for user {user_id}")
         else:
             # 简单匹配（兼容模式）
             for mapping in keyword_mappings:
                 if mapping.keyword.lower() in text.lower():
-                    # 检查是否已经有此标签，避免重复
-                    existing_log = AutoTagLog.query.filter_by(
-                        tg_user_id=user_id,
-                        tag_id=mapping.tag_id
-                    ).first()
-
-                    if not existing_log:
-                        matched_tags.append({
-                            'tag_id': mapping.tag_id,
-                            'keyword': mapping.keyword,
-                            'auto_focus': mapping.auto_focus,
-                            'mapping_id': mapping.id
-                        })
-                        logger.debug(f"Matched keyword '{mapping.keyword}' for user {user_id}")
+                    matched_tags.append({
+                        'tag_id': mapping.tag_id,
+                        'keyword': mapping.keyword,
+                        'auto_focus': mapping.auto_focus,
+                        'mapping_id': mapping.id
+                    })
+                    logger.debug(f"Matched keyword '{mapping.keyword}' for user {user_id}")
 
         return matched_tags
 
@@ -378,6 +368,8 @@ class AutoTaggingService:
         1. 关键词映射缓存（已有）
         2. 批量提交（每batch_commit_size条）
         3. 预加载用户已有标签，减少重复查询
+        4. 提交失败时回滚内存缓存，保持一致性
+        5. 改进异常处理，避免级联失败
 
         Args:
             chat_records: 聊天记录列表
@@ -389,7 +381,8 @@ class AutoTaggingService:
         stats = {
             'total_processed': 0,
             'total_tags_applied': 0,
-            'failed_count': 0
+            'failed_count': 0,
+            'batch_rollback_count': 0
         }
 
         if not chat_records:
@@ -417,6 +410,9 @@ class AutoTaggingService:
             logger.info(f"Preloading group info for {len(chat_ids)} groups")
             groups = TgGroup.query.filter(TgGroup.chat_id.in_(chat_ids)).all()
             group_info_map = {g.chat_id: g.title or '' for g in groups}
+
+        # 追踪每个批次的缓存修改，便于回滚
+        batch_cache_updates = []
 
         # 批量处理
         for i, record in enumerate(chat_records):
@@ -457,10 +453,18 @@ class AutoTaggingService:
                         )
                         stats['total_tags_applied'] += applied
 
-                        # 更新内存缓存
+                        # 记录此批次缓存修改，便于失败时回滚
+                        updates = []
                         for tag in matched_tags:
+                            updates.append({
+                                'user_id': user_id,
+                                'tag_id': tag['tag_id'],
+                                'log_key': (tag['tag_id'], 'chat', source_id)
+                            })
                             existing_user_tags.setdefault(user_id, set()).add(tag['tag_id'])
                             existing_logs.setdefault(user_id, set()).add((tag['tag_id'], 'chat', source_id))
+
+                        batch_cache_updates.extend(updates)
 
                 stats['total_processed'] += 1
 
@@ -469,21 +473,40 @@ class AutoTaggingService:
                     try:
                         db.session.commit()
                         logger.info(f"Committed batch at {i + 1}/{len(chat_records)} records")
+                        # 提交成功，清空当前批次的缓存追踪
+                        batch_cache_updates = []
                     except Exception as e:
-                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}")
+                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}", exc_info=True)
                         db.session.rollback()
                         stats['failed_count'] += batch_commit_size
+                        stats['batch_rollback_count'] += 1
+
+                        # 回滚内存缓存以保持一致性
+                        for update in batch_cache_updates:
+                            user_id = update['user_id']
+                            tag_id = update['tag_id']
+                            log_key = update['log_key']
+
+                            # 安全地移除缓存的标签
+                            if user_id in existing_user_tags:
+                                existing_user_tags[user_id].discard(tag_id)
+                            if user_id in existing_logs:
+                                existing_logs[user_id].discard(log_key)
+
+                        batch_cache_updates = []
 
             except Exception as e:
                 stats['failed_count'] += 1
-                logger.error(f"Failed to process chat record {record.id}: {str(e)}")
+                # 使用记录ID的字符串形式避免访问可能过期的对象属性
+                record_id = getattr(record, 'id', 'unknown')
+                logger.error(f"Failed to process chat record {record_id}: {str(e)}", exc_info=True)
 
         # 提交剩余记录
         try:
             db.session.commit()
             logger.info(f"Committed final batch")
         except Exception as e:
-            logger.error(f"Failed to commit final batch: {str(e)}")
+            logger.error(f"Failed to commit final batch: {str(e)}", exc_info=True)
             db.session.rollback()
 
         logger.info(f"Batch processing completed: {stats}")
@@ -504,7 +527,8 @@ class AutoTaggingService:
         stats = {
             'total_processed': 0,
             'total_tags_applied': 0,
-            'failed_count': 0
+            'failed_count': 0,
+            'batch_rollback_count': 0
         }
 
         if not user_infos:
@@ -524,6 +548,9 @@ class AutoTaggingService:
         for user_id in user_ids:
             logs = AutoTagLog.query.filter_by(tg_user_id=user_id).all()
             existing_logs[user_id] = set([(log.tag_id, log.source_type, log.source_id) for log in logs])
+
+        # 追踪每个批次的缓存修改，便于回滚
+        batch_cache_updates = []
 
         for i, user_info in enumerate(user_infos):
             try:
@@ -572,10 +599,18 @@ class AutoTaggingService:
                         )
                         stats['total_tags_applied'] += applied
 
-                        # 更新缓存
+                        # 记录此批次缓存修改，便于失败时回滚
+                        updates = []
                         for tag in matched_tags:
+                            updates.append({
+                                'user_id': user_id,
+                                'tag_id': tag['tag_id'],
+                                'log_key': (tag['tag_id'], source_type, user_id)
+                            })
                             existing_user_tags.setdefault(user_id, set()).add(tag['tag_id'])
                             existing_logs.setdefault(user_id, set()).add((tag['tag_id'], source_type, user_id))
+
+                        batch_cache_updates.extend(updates)
 
                 stats['total_processed'] += 1
 
@@ -584,21 +619,40 @@ class AutoTaggingService:
                     try:
                         db.session.commit()
                         logger.info(f"Committed batch at {i + 1}/{len(user_infos)} users")
+                        # 提交成功，清空当前批次的缓存追踪
+                        batch_cache_updates = []
                     except Exception as e:
-                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}")
+                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}", exc_info=True)
                         db.session.rollback()
                         stats['failed_count'] += batch_commit_size
+                        stats['batch_rollback_count'] += 1
+
+                        # 回滚内存缓存以保持一致性
+                        for update in batch_cache_updates:
+                            user_id = update['user_id']
+                            tag_id = update['tag_id']
+                            log_key = update['log_key']
+
+                            # 安全地移除缓存的标签
+                            if user_id in existing_user_tags:
+                                existing_user_tags[user_id].discard(tag_id)
+                            if user_id in existing_logs:
+                                existing_logs[user_id].discard(log_key)
+
+                        batch_cache_updates = []
 
             except Exception as e:
                 stats['failed_count'] += 1
-                logger.error(f"Failed to process user info {user_info.id}: {str(e)}")
+                # 使用记录ID的字符串形式避免访问可能过期的对象属性
+                user_info_id = getattr(user_info, 'id', 'unknown')
+                logger.error(f"Failed to process user info {user_info_id}: {str(e)}", exc_info=True)
 
         # 提交剩余记录
         try:
             db.session.commit()
             logger.info(f"Committed final batch")
         except Exception as e:
-            logger.error(f"Failed to commit final batch: {str(e)}")
+            logger.error(f"Failed to commit final batch: {str(e)}", exc_info=True)
             db.session.rollback()
 
         logger.info(f"User info batch processing completed: {stats}")
@@ -764,7 +818,8 @@ class AutoTaggingService:
         stats = {
             'total_processed': 0,
             'total_tags_applied': 0,
-            'failed_count': 0
+            'failed_count': 0,
+            'batch_rollback_count': 0
         }
 
         if not websites:
@@ -778,6 +833,15 @@ class AutoTaggingService:
 
         logger.info(f"Starting batch processing of {len(websites)} websites")
 
+        # 预加载已有的URL标签日志（避免重复）
+        existing_url_tags = {}
+        tracking_ids = [w.get('tracking_id', w.get('url', '')) for w in websites]
+        for tracking_id in set(tracking_ids):
+            logs = UrlTagLog.query.filter_by(tracking_id=tracking_id).all()
+            existing_url_tags[str(tracking_id)] = set([(log.tag_id,) for log in logs])
+
+        batch_cache_updates = []
+
         for i, website_data in enumerate(websites):
             try:
                 url = website_data.get('url', '')
@@ -785,6 +849,7 @@ class AutoTaggingService:
                 website_title = website_data.get('website_title', '')
                 tracking_id = website_data.get('tracking_id', url)  # 默认使用URL
                 source_id = website_data.get('source_id', tracking_id)
+                tracking_id_str = str(tracking_id)
 
                 if not website_title or not website_title.strip():
                     logger.debug(f"Skipping website with empty title: {url}")
@@ -794,10 +859,17 @@ class AutoTaggingService:
                 # 匹配标签
                 matched_tags = self.process_text_for_tags(
                     website_title,
-                    tracking_id,
+                    tracking_id_str,
                     'website_title',
                     source_id
                 )
+
+                # 过滤已存在的标签
+                if tracking_id_str in existing_url_tags:
+                    matched_tags = [
+                        t for t in matched_tags
+                        if (t['tag_id'],) not in existing_url_tags[tracking_id_str]
+                    ]
 
                 if matched_tags:
                     # 应用标签
@@ -809,10 +881,21 @@ class AutoTaggingService:
 
                     applied = self.apply_website_tags(
                         url, domain, website_title,
-                        matched_tags, tracking_id, source_id,
+                        matched_tags, tracking_id_str, source_id,
                         commit=False
                     )
                     stats['total_tags_applied'] += applied
+
+                    # 记录此批次缓存修改，便于失败时回滚
+                    updates = []
+                    for tag in matched_tags:
+                        updates.append({
+                            'tracking_id': tracking_id_str,
+                            'tag_id': tag['tag_id']
+                        })
+                        existing_url_tags.setdefault(tracking_id_str, set()).add((tag['tag_id'],))
+
+                    batch_cache_updates.extend(updates)
 
                 stats['total_processed'] += 1
 
@@ -821,21 +904,34 @@ class AutoTaggingService:
                     try:
                         db.session.commit()
                         logger.info(f"Committed batch at {i + 1}/{len(websites)} websites")
+                        # 提交成功，清空当前批次的缓存追踪
+                        batch_cache_updates = []
                     except Exception as e:
-                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}")
+                        logger.error(f"Failed to commit batch at {i + 1}: {str(e)}", exc_info=True)
                         db.session.rollback()
                         stats['failed_count'] += batch_commit_size
+                        stats['batch_rollback_count'] += 1
+
+                        # 回滚内存缓存以保持一致性
+                        for update in batch_cache_updates:
+                            tracking_id_key = update['tracking_id']
+                            tag_id = update['tag_id']
+
+                            if tracking_id_key in existing_url_tags:
+                                existing_url_tags[tracking_id_key].discard((tag_id,))
+
+                        batch_cache_updates = []
 
             except Exception as e:
                 stats['failed_count'] += 1
-                logger.error(f"Failed to process website {website_data.get('url', 'unknown')}: {str(e)}")
+                logger.error(f"Failed to process website {website_data.get('url', 'unknown')}: {str(e)}", exc_info=True)
 
         # 提交剩余记录
         try:
             db.session.commit()
             logger.info(f"Committed final batch of websites")
         except Exception as e:
-            logger.error(f"Failed to commit final batch: {str(e)}")
+            logger.error(f"Failed to commit final batch: {str(e)}", exc_info=True)
             db.session.rollback()
 
         logger.info(f"Website batch processing completed: {stats}")

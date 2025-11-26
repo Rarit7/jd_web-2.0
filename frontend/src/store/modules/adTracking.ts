@@ -381,6 +381,20 @@ export const useAdTrackingStore = defineStore('adTracking', () => {
   }
 
   /**
+   * 设置详情数据
+   */
+  function setDetailDrawerData(data: any) {
+    currentDetail.value = data
+  }
+
+  /**
+   * 打开详情侧边栏
+   */
+  function openDetailDrawer() {
+    showDetailDrawer.value = true
+  }
+
+  /**
    * 关闭详情侧边栏
    */
   function closeDetailDrawer() {
@@ -456,6 +470,8 @@ export const useAdTrackingStore = defineStore('adTracking', () => {
     resetFilters,
     setPage,
     setPageSize,
+    setDetailDrawerData,
+    openDetailDrawer,
     closeDetailDrawer,
     executeTask,
     getTaskStatus

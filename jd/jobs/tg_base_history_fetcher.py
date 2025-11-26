@@ -105,16 +105,22 @@ class BaseTgHistoryFetcher:
                     new_chat_id = result.get('data', {}).get('id', 0)
                     if not new_chat_id:
                         logger.error(f'加入群组失败: {group_name} 找不到chat_id')
+                        # 加入失败，标记群组为失效
+                        self._mark_group_as_invalid_link(chat_id, group_name, f'加入群组失败: 找不到chat_id')
                         return None, chat_id
                     chat_id = new_chat_id
                     chat = await self.tg.get_dialog(chat_id)
                     if not chat:
                         logger.error(f'加入群组失败: {group_name} 无法获取dialog')
+                        # 获取dialog失败，标记群组为失效
+                        self._mark_group_as_invalid_link(chat_id, group_name, f'加入群组后无法获取dialog')
                         return None, chat_id
                     else:
                         logger.info(f'成功加入群组 {group_name} 并获取dialog')
                 except Exception as e:
                     logger.error(f'尝试加入群组 {group_name} 时发生错误: {e}')
+                    # 加入异常，标记群组为失效
+                    self._mark_group_as_invalid_link(chat_id, group_name, f'加入群组异常: {str(e)}')
                     return None, chat_id
             else:
                 logger.warning(f'chat_id {chat_id} 获取失败且group_name无效 ("{group_name}")，无法自动加入群组')
@@ -144,6 +150,31 @@ class BaseTgHistoryFetcher:
                 db.session.rollback()
             except Exception as rollback_error:
                 logger.error(f'群组状态更新回滚失败: {rollback_error}')
+
+    def _mark_group_as_invalid_link(self, chat_id: int, group_name: str, reason: str):
+        """当无法加入群组时，将群组标记为失效状态（INVALID_LINK）"""
+        try:
+            from jd.models.tg_group import TgGroup
+            group = TgGroup.query.filter_by(chat_id=str(chat_id)).first()
+            if not group:
+                logger.warning(f'标记失效失败|{group_name}|群组记录不存在')
+                return
+
+            # 只有当前状态是JOIN_SUCCESS时才更新为INVALID_LINK
+            if group.status == TgGroup.StatusType.JOIN_SUCCESS:
+                group.status = TgGroup.StatusType.INVALID_LINK
+                group.remark = reason
+                db.session.commit()
+                logger.info(f'标记群组为失效|{group_name}|chat_id={chat_id}，原因: {reason}')
+            else:
+                logger.info(f'标记失效|{group_name}|群组状态已变更|当前状态={group.status}，不再标记为失效')
+        except Exception as e:
+            logger.error(f'标记群组失效失败|{group_name}: {e}')
+            if db.session.in_transaction():
+                try:
+                    db.session.rollback()
+                except Exception as rollback_error:
+                    logger.error(f'标记失效事务回滚失败|{group_name}: {rollback_error}')
     
     def get_sessionnames_by_accountid(self, account_id):
         """从tg_group_session获取session名称列表，按account_id升序排序"""

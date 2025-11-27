@@ -23,7 +23,7 @@
         v-else
         :data="displayData"
         stripe
-        style="width: 100%"
+        :style="{ width: '100%' }"
         :max-height="600"
         v-loading="props.loading"
         element-loading-text="加载中..."
@@ -43,9 +43,9 @@
             <div v-if="hasImages(row)" class="image-preview">
               <el-image
                 :src="getFirstImage(row)"
-                :preview-src-list="getImageList(row)"
                 fit="cover"
                 style="width: 60px; height: 60px; cursor: pointer"
+                @click="openImageInNewWindow(getFirstImage(row))"
               />
             </div>
             <span v-else class="text-muted">--</span>
@@ -229,13 +229,6 @@ const displayData = computed(() => {
 
 // ==================== Methods ====================
 
-/**
- * 截断文本
- */
-function truncateText(text: string, length: number = 100): string {
-  if (!text) return '--'
-  return text.length > length ? text.substring(0, length) + '...' : text
-}
 
 /**
  * 检查是否有图片
@@ -265,12 +258,6 @@ function getFirstImage(row: HighValueInfo): string {
   return imagePath ? buildImageUrl(imagePath) : ''
 }
 
-/**
- * 获取所有图片列表
- */
-function getImageList(row: HighValueInfo): string[] {
-  return (row.images || []).map(buildImageUrl)
-}
 
 /**
  * 格式化时间
@@ -321,6 +308,15 @@ function getImportanceColor(score?: number): string {
   if (score >= 41) return '#409EFF'      // 蓝色 - 中等风险
   if (score >= 21) return '#67C23A'      // 绿色 - 低风险
   return '#909399'                       // 灰色 - 无风险
+}
+
+/**
+ * 在新窗口打开图片
+ */
+function openImageInNewWindow(imageUrl: string) {
+  if (imageUrl) {
+    window.open(imageUrl, '_blank')
+  }
 }
 </script>
 

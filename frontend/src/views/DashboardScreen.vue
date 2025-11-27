@@ -145,21 +145,21 @@ const echart2Data = ref({
 const wordCloudData = ref({
   title: '关键词云',
   data: [
-    { name: '数据分析', value: 180 },
-    { name: '机器学习', value: 165 },
-    { name: '人工智能', value: 150 },
-    { name: '大数据', value: 135 },
-    { name: '云计算', value: 120 },
-    { name: '深度学习', value: 110 },
-    { name: '算法优化', value: 95 },
-    { name: '数据挖掘', value: 88 },
-    { name: '可视化', value: 82 },
-    { name: '预测模型', value: 75 },
-    { name: '统计分析', value: 68 },
-    { name: '神经网络', value: 60 },
-    { name: '自然语言', value: 55 },
-    { name: '图像识别', value: 50 },
-    { name: '智能推荐', value: 45 }
+    { name: 'USDT', value: 180 },
+    { name: 'U币', value: 165 },
+    { name: '信件', value: 150 },
+    { name: '烟油', value: 135 },
+    { name: '叶子', value: 120 },
+    { name: '六合彩', value: 110 },
+    { name: '开户', value: 95 },
+    { name: '跑分', value: 88 },
+    { name: '提现', value: 82 },
+    { name: '充值', value: 75 },
+    { name: '走账', value: 68 },
+    { name: '代付', value: 60 },
+    { name: '刷单', value: 55 },
+    { name: '打卡', value: 50 },
+    { name: '接码', value: 45 }
   ]
 })
 

@@ -141,7 +141,6 @@ class BaseTgHistoryFetcher:
                 # 只有当前状态是JOIN_SUCCESS时才更新，避免重复更新
                 if group.status == TgGroup.StatusType.JOIN_SUCCESS:
                     group.status = TgGroup.StatusType.JOIN_FAIL
-                    group.remark = f'Dialog获取失败，可能已被移出群组或群组不存在'
                     db.session.commit()
                     logger.info(f'更新群组 {group_name} (chat_id: {chat_id}) 状态为加入失败')
         except Exception as e:
@@ -163,7 +162,6 @@ class BaseTgHistoryFetcher:
             # 只有当前状态是JOIN_SUCCESS时才更新为INVALID_LINK
             if group.status == TgGroup.StatusType.JOIN_SUCCESS:
                 group.status = TgGroup.StatusType.INVALID_LINK
-                group.remark = reason
                 db.session.commit()
                 logger.info(f'标记群组为失效|{group_name}|chat_id={chat_id}，原因: {reason}')
             else:

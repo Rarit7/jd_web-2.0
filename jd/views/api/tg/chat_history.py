@@ -4,7 +4,7 @@ import os
 from urllib.parse import quote
 import mimetypes
 
-from flask import request, make_response, send_file, session
+from flask import request, make_response, send_file, session, g, jsonify
 import pandas as pd
 from io import BytesIO
 
@@ -18,10 +18,11 @@ from jd.models.tg_group import TgGroup
 from jd.models.tg_group_chat_history import TgGroupChatHistory
 from jd.models.tg_group_user_info import TgGroupUserInfo
 from jd.models.tg_document_info import TgDocumentInfo
+from jd.models.tg_group_session import TgGroupSession
 from jd.services.role_service.role import ROLE_SUPER_ADMIN, RoleService
 from jd.views import get_or_exception
 from jd.views.api import api
-from flask import jsonify
+from jd.helpers.permission_helper import get_accessible_tg_user_ids
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +335,10 @@ def tg_chat_room_history():
 
 @api.route('/tg/chat_room/history/json', methods=['GET'])
 def tg_chat_room_history_json():
-    """返回JSON格式的聊天记录数据"""
+    """返回JSON格式的聊天记录数据
+
+    自动应用部门过滤：非超级管理员只能查看本部门关联的TG账户的聊天历史
+    """
     try:
         args = request.args
         page = get_or_exception('page', args, 'int', 1)
@@ -344,16 +348,42 @@ def tg_chat_room_history_json():
         end_date = get_or_exception('end_date', args, 'str', '')
         message_id = get_or_exception('message_id', args, 'int', 0)
         reply_to_msg_id = get_or_exception('reply_to_msg_id', args, 'int', 0)
-        
+
         # 支持单个群组ID参数和多个群组ID参数
         group_id = get_or_exception('group_id', args, 'str', '')
         search_chat_id_list = args.getlist('search_group_id')
         if group_id:
             search_chat_id_list = [group_id]
-        
+
+        # 部门过滤：非超级管理员只能查看本部门的聊天历史
+        if hasattr(g, 'current_user') and g.current_user:
+            accessible_tg_user_ids = get_accessible_tg_user_ids(g.current_user)
+
+            # 如果不是None（即不是超级管理员），应用部门过滤
+            if accessible_tg_user_ids is not None:
+                if accessible_tg_user_ids:
+                    # 通过TgGroupSession查找这些TG账户相关的群组
+                    accessible_chat_ids = db.session.query(TgGroupSession.chat_id)\
+                        .filter(TgGroupSession.user_id.in_(accessible_tg_user_ids))\
+                        .distinct().all()
+
+                    if accessible_chat_ids:
+                        dept_chat_ids = [chat_id[0] for chat_id in accessible_chat_ids]
+                        # 如果用户指定了chat_id_list，取交集
+                        if search_chat_id_list:
+                            search_chat_id_list = [cid for cid in search_chat_id_list if cid in dept_chat_ids]
+                        else:
+                            search_chat_id_list = dept_chat_ids
+                    else:
+                        # 部门没有关联任何群组，返回空结果
+                        search_chat_id_list = ['-1']  # 不存在的chat_id
+                else:
+                    # 部门没有关联任何TG账户，返回空结果
+                    search_chat_id_list = ['-1']
+
         # 支持查看所有历史记录的选项
         show_all = get_or_exception('show_all', args, 'str', '')
-        
+
         search_user_id_list = args.getlist('search_user_id')
         search_account_id_list = args.getlist('search_account_id')
 
@@ -733,71 +763,140 @@ def tg_chat_room_history_by_private_chat(chat_id):
 def fetch_tg_group_chat_history(start_date, end_date, search_chat_id_list, search_user_id_list, search_content,
                                 page=None,
                                 page_size=None, search_account_id_list=None, message_id=0, reply_to_msg_id=0, show_all=''):
-    # 直接查询所有消息，并左连接文档信息表
-    query = db.session.query(
-        TgGroupChatHistory,
-        TgDocumentInfo.filename_origin,
-        TgDocumentInfo.file_ext_name,
-        TgDocumentInfo.mime_type,
-        TgDocumentInfo.filepath,
-        TgDocumentInfo.video_thumb_path,
-        TgDocumentInfo.file_hash,
-        TgDocumentInfo.file_size,
-        TgDocumentInfo.peer_id
-    ).outerjoin(
-        TgDocumentInfo,
-        (TgGroupChatHistory.chat_id == TgDocumentInfo.chat_id) &
-        (TgGroupChatHistory.message_id == TgDocumentInfo.message_id)
-    )
+    """
+    优化版本：分离 JOIN 操作以提升性能
 
+    优化策略：
+    1. 第一步：构建基础查询（不含 JOIN），应用所有过滤条件
+    2. 第二步：在基础查询上计算总数
+    3. 第三步：应用排序和分页
+    4. 第四步：获取分页后的消息 ID 列表
+    5. 第五步：批量查询文档信息
+    6. 第六步：将结果合并
+
+    性能提升：避免在大 JOIN 结果集上进行 COUNT，仅在小数据集上进行 JOIN
+    """
+
+    # ===== 步骤 1: 构建基础查询（不包含 JOIN）=====
+    base_query = db.session.query(TgGroupChatHistory)
+
+    # 应用时间过滤
     if start_date and end_date:
         f_start_date = start_date + ' 00:00:00'
         f_end_date = end_date + ' 23:59:59'
-        query = query.filter(TgGroupChatHistory.postal_time.between(f_start_date, f_end_date))
+        base_query = base_query.filter(TgGroupChatHistory.postal_time.between(f_start_date, f_end_date))
     elif show_all != 'true':
         # 只有在不是查看全部记录时才应用默认时间限制
         now_time = datetime.datetime.now()
         start_time = (now_time - datetime.timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
         end_time = now_time.strftime('%Y-%m-%d 23:59:59')
-        query = query.filter(TgGroupChatHistory.postal_time.between(start_time, end_time))
+        base_query = base_query.filter(TgGroupChatHistory.postal_time.between(start_time, end_time))
+
+    # 应用群组过滤
     search_chat_id_list = [r for r in search_chat_id_list if r]
     if search_chat_id_list:
-        query = query.filter(TgGroupChatHistory.chat_id.in_(search_chat_id_list))
+        base_query = base_query.filter(TgGroupChatHistory.chat_id.in_(search_chat_id_list))
+
+    # 应用用户过滤
     search_user_id_list = [r for r in search_user_id_list if r]
     if search_user_id_list:
-        query = query.filter(TgGroupChatHistory.user_id.in_(search_user_id_list))
+        base_query = base_query.filter(TgGroupChatHistory.user_id.in_(search_user_id_list))
+
+    # 应用内容搜索
     if search_content:
-        query = query.filter(TgGroupChatHistory.message.like(f'%{search_content}%'))
+        base_query = base_query.filter(TgGroupChatHistory.message.like(f'%{search_content}%'))
+
+    # 应用账户过滤
     search_account_id_list = [r for r in search_account_id_list if r]
     if search_account_id_list:
         tg_accounts = TgAccount.query.filter(TgAccount.id.in_(search_account_id_list)).all()
         user_id_list = [t.user_id for t in tg_accounts]
         his = TgGroupChatHistory.query.filter(TgGroupChatHistory.user_id.in_(user_id_list)).all()
         chat_id_list = [t.chat_id for t in his]
-        query = query.filter(TgGroupChatHistory.chat_id.in_(chat_id_list))
+        base_query = base_query.filter(TgGroupChatHistory.chat_id.in_(chat_id_list))
+
+    # 应用回复消息过滤
     if reply_to_msg_id:
-        query = query.filter(TgGroupChatHistory.message_id == reply_to_msg_id)
+        base_query = base_query.filter(TgGroupChatHistory.message_id == reply_to_msg_id)
+
+    # 应用特定消息上下文查询
     if message_id:
-        message = query.filter(TgGroupChatHistory.id == message_id).first()
+        message = base_query.filter(TgGroupChatHistory.id == message_id).first()
         if message:
             start_time = message.postal_time - datetime.timedelta(hours=1)
             end_time = message.postal_time + datetime.timedelta(minutes=5)
-            query = query.filter(TgGroupChatHistory.chat_id == message.chat_id,
-                                 TgGroupChatHistory.postal_time >= start_time,
-                                 TgGroupChatHistory.postal_time <= end_time)
+            base_query = base_query.filter(
+                TgGroupChatHistory.chat_id == message.chat_id,
+                TgGroupChatHistory.postal_time >= start_time,
+                TgGroupChatHistory.postal_time <= end_time
+            )
 
-    # 获取总数
-    total_records = query.count()
-    
-    # 使用数据库层面分页，并按时间排序（从旧到新）
-    query = query.order_by(TgGroupChatHistory.postal_time.asc())
-    
-    # 应用分页
+    # ===== 步骤 2: 获取总数（优化：不包含 JOIN）=====
+    total_records = base_query.count()
+
+    # ===== 步骤 3: 排序和分页（在基础查询上执行）=====
+    base_query = base_query.order_by(TgGroupChatHistory.postal_time.asc())
+
     if page and page_size:
-        query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    rows = query.all()
-        
+        base_query = base_query.offset((page - 1) * page_size).limit(page_size)
+
+    # ===== 步骤 4: 获取分页结果 =====
+    filtered_rows = base_query.all()
+
+    # ===== 步骤 5: 为分页结果添加 JOIN 文档信息 =====
+    if not filtered_rows:
+        return [], total_records
+
+    # 构建消息 ID 列表用于 JOIN
+    message_ids = [(r.chat_id, r.message_id) for r in filtered_rows]
+
+    # 查询文档信息
+    document_map = {}
+    if message_ids:
+        # 批量查询文档信息
+        documents = db.session.query(
+            TgDocumentInfo.chat_id,
+            TgDocumentInfo.message_id,
+            TgDocumentInfo.filename_origin,
+            TgDocumentInfo.file_ext_name,
+            TgDocumentInfo.mime_type,
+            TgDocumentInfo.filepath,
+            TgDocumentInfo.video_thumb_path,
+            TgDocumentInfo.file_hash,
+            TgDocumentInfo.file_size,
+            TgDocumentInfo.peer_id
+        ).filter(
+            db.or_(
+                *[
+                    db.and_(
+                        TgDocumentInfo.chat_id == chat_id,
+                        TgDocumentInfo.message_id == msg_id
+                    )
+                    for chat_id, msg_id in message_ids
+                ]
+            )
+        ).all()
+
+        # 构建查询映射表，便于快速查找
+        for doc in documents:
+            key = f"{doc[0]}_{doc[1]}"
+            document_map[key] = doc
+
+    # ===== 步骤 6: 合并结果 =====
+    rows = []
+    for record in filtered_rows:
+        key = f"{record.chat_id}_{record.message_id}"
+        doc = document_map.get(key)
+
+        if doc:
+            # 有文档信息：(record, filename_origin, file_ext_name, mime_type, filepath, video_thumb_path, file_hash, file_size, peer_id)
+            row = (record, doc[2], doc[3], doc[4], doc[5], doc[6], doc[7], doc[8], doc[9])
+        else:
+            # 无文档信息：(record, None, None, None, None, None, None, None, None)
+            row = (record, None, None, None, None, None, None, None, None)
+
+        rows.append(row)
+
     return rows, total_records
 
 

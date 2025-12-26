@@ -1,11 +1,12 @@
 from functools import wraps
 
-from flask import Blueprint, redirect, url_for
+from flask import Blueprint, redirect, url_for, g
 from flask_jwt_extended import JWTManager
 
 from jd import app, db
 from jd.helpers.user import current_user_id
 from jd.models.user_role import UserRole
+from jd.models.secure_user import SecureUser
 from jd.services.role_service.role import ROLE_MAP
 from jd.views import APIException
 
@@ -29,6 +30,11 @@ class ApiBlueprint(Blueprint):
 
             @wraps(fn)
             def decorated_view(*args, **kwargs):
+                # 设置g.current_user对象（用于部门权限检查）
+                if current_user_id and not hasattr(g, 'current_user'):
+                    user = db.session.query(SecureUser).filter_by(id=current_user_id).first()
+                    g.current_user = user
+
                 if need_login and not current_user_id:
                     raise APIException('未登录', 40101, 401)
 
@@ -68,3 +74,4 @@ from . import system
 from . import job_queue
 from . import ad_tracking
 from . import user_profile
+from . import department

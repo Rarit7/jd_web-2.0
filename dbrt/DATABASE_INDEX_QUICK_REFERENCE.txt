@@ -1,0 +1,311 @@
+================================================================================
+  Telegram 聊天记录表 - 数据库索引优化 快速参考指南
+  文档版本: 1.0
+  创建日期: 2025-12-25
+================================================================================
+
+快速导航:
+  1. 执行前检查清单 ............................. [检查清单]
+  2. 一键执行优化 ............................... [执行]
+  3. 验证索引创建 ............................... [验证]
+  4. 紧急回滚 ................................... [回滚]
+  5. 故障排除 ................................... [故障排除]
+
+================================================================================
+[检查清单] 执行前必须完成以下检查
+================================================================================
+
+□ 1. 备份数据库
+    命令: mysqldump -u root -h 127.0.0.1 -P 8906 jd > jd_backup_$(date +%Y%m%d_%H%M%S).sql
+    验证: ls -lh jd_backup_*.sql  # 确保文件 > 100MB
+
+□ 2. 检查磁盘空间
+    命令: df -h /var/lib/mysql
+    要求: 可用空间 > 2GB
+
+□ 3. 停止应用
+    命令: cd /home/ec2-user/workspace/jd_web && bash stop.sh
+    验证: sleep 10 && ps aux | grep python | grep -v grep
+
+□ 4. 确认数据库连接
+    命令: mysql -u root -h 127.0.0.1 -P 8906 jd -e "SELECT VERSION();"
+    要求: 连接成功
+
+□ 5. 记录当前索引状态（可选但推荐）
+    命令:
+    mysql -u root -h 127.0.0.1 -P 8906 jd -e "
+    SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = 'jd'
+      AND TABLE_NAME IN ('tg_document_info', 'tg_group_user_info', 'tg_group_chat_history');
+    "
+
+✓ 所有检查完成，可以开始执行优化
+
+================================================================================
+[执行] 一键执行优化
+================================================================================
+
+方式 A: 使用预制 SQL 脚本（推荐）
+
+  1. 进入数据库脚本目录
+     cd /home/ec2-user/workspace/jd_web/dbrt
+
+  2. 执行优化脚本
+     mysql -u root -h 127.0.0.1 -P 8906 jd < database_index_optimization.sql
+
+  3. 等待完成（5-15 分钟）
+     # 脚本会自动创建所有索引并更新统计信息
+
+方式 B: 手动逐步执行（用于调试）
+
+  1. 连接到数据库
+     mysql -u root -h 127.0.0.1 -P 8906 jd
+
+  2. 复制粘贴 SQL 语句逐条执行
+     # 参考 database_index_optimization.sql 中的每个步骤
+
+================================================================================
+[验证] 验证索引创建成功
+================================================================================
+
+快速验证（1 分钟）:
+
+  mysql -u root -h 127.0.0.1 -P 8906 jd << 'EOF'
+  SHOW INDEX FROM tg_document_info\G
+  SHOW INDEX FROM tg_group_user_info\G
+  SHOW INDEX FROM tg_group_chat_history\G
+  EOF
+
+预期结果:
+  ✓ tg_document_info 应该显示 idx_chat_message 索引
+  ✓ tg_group_user_info 应该显示 idx_username 和 idx_chatid_userid 索引
+  ✓ tg_group_chat_history 应该显示 idx_chatid_time 索引
+
+详细验证（性能测试）:
+
+  mysql -u root -h 127.0.0.1 -P 8906 jd << 'EOF'
+
+  -- 测试 1: 基础查询
+  SELECT COUNT(*) FROM tg_group_chat_history
+  WHERE postal_time >= DATE_SUB(NOW(), INTERVAL 30 DAY);
+
+  -- 测试 2: JOIN 查询（应显示使用了 idx_chat_message 索引）
+  EXPLAIN FORMAT=JSON
+  SELECT tgh.*, td.filename_origin
+  FROM tg_group_chat_history tgh
+  LEFT JOIN tg_document_info td
+    ON tgh.chat_id = td.chat_id AND tgh.message_id = td.message_id
+  WHERE tgh.postal_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+  LIMIT 20;
+
+  EOF
+
+启动应用:
+
+  cd /home/ec2-user/workspace/jd_web
+  bash start.sh -a
+  sleep 30
+
+功能测试:
+
+  # 测试聊天记录查询 API
+  curl -X GET "http://localhost:8931/api/tg/chat_room/history/json?page=1&page_size=20" \
+    -H "Accept: application/json" \
+    -s | jq '.payload.total_records'
+
+  # 预期: 返回记录总数（验证 API 正常）
+
+================================================================================
+[回滚] 紧急回滚（当出现问题时）
+================================================================================
+
+完整回滚流程（3 分钟）:
+
+  1. 停止应用
+     bash /home/ec2-user/workspace/jd_web/stop.sh
+
+  2. 执行回滚脚本
+     mysql -u root -h 127.0.0.1 -P 8906 jd < /home/ec2-user/workspace/jd_web/dbrt/database_index_rollback.sql
+
+  3. 验证回滚成功
+     mysql -u root -h 127.0.0.1 -P 8906 jd << 'EOF'
+     SHOW INDEX FROM tg_document_info;
+     SHOW INDEX FROM tg_group_user_info;
+     SHOW INDEX FROM tg_group_chat_history;
+     EOF
+     # 预期: 仅显示 PRIMARY KEY
+
+  4. 启动应用
+     bash /home/ec2-user/workspace/jd_web/start.sh -a
+
+  5. 验证应用正常
+     curl -X GET "http://localhost:8931/api/tg/chat_room/history/json?page=1&page_size=20" \
+       -H "Accept: application/json" \
+       -s | jq '.err_code'
+     # 预期: 返回 0
+
+从备份恢复（最后手段，15 分钟）:
+
+  1. 停止应用
+     bash /home/ec2-user/workspace/jd_web/stop.sh
+
+  2. 找到最近的备份文件
+     ls -lht jd_backup_*.sql | head -5
+
+  3. 恢复备份
+     mysql -u root -h 127.0.0.1 -P 8906 jd < jd_backup_YYYYMMDD_HHMMSS.sql
+
+  4. 启动应用
+     bash /home/ec2-user/workspace/jd_web/start.sh -a
+
+================================================================================
+[故障排除] 常见问题和解决方案
+================================================================================
+
+问题 1: 执行 SQL 超时
+症状: "ERROR 1205: Lock wait timeout exceeded"
+原因: 表被其他进程锁定
+解决:
+  1. 停止应用进程
+     bash /home/ec2-user/workspace/jd_web/stop.sh
+  2. 检查是否有长时间运行的查询
+     mysql -u root -h 127.0.0.1 -P 8906 -e "SHOW PROCESSLIST;"
+  3. 重新执行优化脚本
+
+问题 2: 磁盘空间不足
+症状: "ERROR 1030: Got error 28 from storage engine"
+原因: 磁盘可用空间 < 1GB
+解决:
+  1. 检查磁盘使用情况
+     df -h /var/lib/mysql
+  2. 清理日志或备份文件
+     rm -f logs/jd.log.* backups/jd_backup_*.sql (旧文件)
+  3. 重新执行优化脚本
+
+问题 3: 索引创建失败
+症状: "ERROR 1061: Duplicate key name"
+原因: 索引已存在
+解决:
+  1. 检查索引是否已存在
+     SHOW INDEX FROM tg_document_info;
+  2. 如果已存在，跳过该索引创建步骤，继续执行其他步骤
+
+问题 4: 应用启动失败
+症状: "ERROR 2013: Lost connection to MySQL server"
+原因: 数据库连接问题
+解决:
+  1. 验证 MySQL 是否正常运行
+     ps aux | grep mysql
+  2. 检查数据库连接配置
+     cat /home/ec2-user/workspace/jd_web/config.py | grep SQLALCHEMY_DATABASE_URI
+  3. 尝试手动连接
+     mysql -u root -h 127.0.0.1 -P 8906 jd -e "SELECT 1;"
+
+问题 5: 查询性能未改进
+症状: 执行优化后，查询速度仍然很慢
+原因: 索引统计信息未更新或查询计划未优化
+解决:
+  1. 更新统计信息
+     mysql -u root -h 127.0.0.1 -P 8906 jd << 'EOF'
+     ANALYZE TABLE tg_document_info;
+     ANALYZE TABLE tg_group_user_info;
+     ANALYZE TABLE tg_group_chat_history;
+     EOF
+  2. 检查查询执行计划
+     EXPLAIN FORMAT=JSON SELECT ... (查询语句);
+     # 检查是否使用了新创建的索引
+  3. 考虑应用侧的优化（参考完整部署指南）
+
+================================================================================
+[监控] 执行后的监控命令
+================================================================================
+
+实时性能监控（每 5 分钟执行一次）:
+
+  # 查看慢查询
+  tail -n 100 /home/ec2-user/workspace/jd_web/logs/jd.log | grep -i "slow\|error"
+
+  # 查看数据库连接数
+  mysql -u root -h 127.0.0.1 -P 8906 -e "SHOW PROCESSLIST;"
+
+  # 查看表大小
+  mysql -u root -h 127.0.0.1 -P 8906 jd -e "
+  SELECT TABLE_NAME,
+         (DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024 as SIZE_MB
+  FROM INFORMATION_SCHEMA.TABLES
+  WHERE TABLE_SCHEMA = 'jd'
+    AND TABLE_NAME IN ('tg_document_info', 'tg_group_user_info', 'tg_group_chat_history');
+  "
+
+长期监控（每周执行一次）:
+
+  # 检查索引统计信息
+  mysql -u root -h 127.0.0.1 -P 8906 jd -e "
+  SELECT TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX, COLUMN_NAME, CARDINALITY
+  FROM INFORMATION_SCHEMA.STATISTICS
+  WHERE TABLE_SCHEMA = 'jd'
+    AND TABLE_NAME IN ('tg_document_info', 'tg_group_user_info', 'tg_group_chat_history')
+  ORDER BY TABLE_NAME, INDEX_NAME;
+  "
+
+  # 优化表（可选）
+  mysql -u root -h 127.0.0.1 -P 8906 jd -e "
+  OPTIMIZE TABLE tg_document_info;
+  OPTIMIZE TABLE tg_group_user_info;
+  OPTIMIZE TABLE tg_group_chat_history;
+  "
+
+================================================================================
+[参考] 重要文件位置
+================================================================================
+
+部署指南:
+  /home/ec2-user/workspace/jd_web/DATABASE_INDEX_OPTIMIZATION_DEPLOYMENT.md
+
+优化 SQL 脚本:
+  /home/ec2-user/workspace/jd_web/dbrt/database_index_optimization.sql
+
+回滚 SQL 脚本:
+  /home/ec2-user/workspace/jd_web/dbrt/database_index_rollback.sql
+
+快速参考（本文件）:
+  /home/ec2-user/workspace/jd_web/dbrt/DATABASE_INDEX_QUICK_REFERENCE.txt
+
+相关源代码:
+  /home/ec2-user/workspace/jd_web/jd/views/api/tg/chat_history.py (第 763-831 行)
+
+数据库备份位置:
+  /home/ec2-user/workspace/jd_web/backups/
+
+================================================================================
+[快速命令速查表] 复制粘贴执行
+================================================================================
+
+# 一键备份
+mysqldump -u root -h 127.0.0.1 -P 8906 jd > backups/jd_backup_$(date +%Y%m%d_%H%M%S).sql
+
+# 停止应用并执行优化
+bash /home/ec2-user/workspace/jd_web/stop.sh && \
+mysql -u root -h 127.0.0.1 -P 8906 jd < /home/ec2-user/workspace/jd_web/dbrt/database_index_optimization.sql && \
+bash /home/ec2-user/workspace/jd_web/start.sh -a
+
+# 快速验证
+mysql -u root -h 127.0.0.1 -P 8906 jd -e "SHOW INDEX FROM tg_document_info; SHOW INDEX FROM tg_group_user_info; SHOW INDEX FROM tg_group_chat_history;"
+
+# 紧急回滚
+bash /home/ec2-user/workspace/jd_web/stop.sh && \
+mysql -u root -h 127.0.0.1 -P 8906 jd < /home/ec2-user/workspace/jd_web/dbrt/database_index_rollback.sql && \
+bash /home/ec2-user/workspace/jd_web/start.sh -a
+
+# 性能测试
+curl -X GET "http://localhost:8931/api/tg/chat_room/history/json?page=1&page_size=20" -s | jq '.payload | {total_records, current_page}'
+
+================================================================================
+
+更新历史:
+  2025-12-25: 初始版本，创建
+
+获取帮助:
+  详见 DATABASE_INDEX_OPTIMIZATION_DEPLOYMENT.md
+
+================================================================================

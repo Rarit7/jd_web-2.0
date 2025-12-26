@@ -1,6 +1,6 @@
 import time
 
-from flask import request, session, jsonify
+from flask import request, session, jsonify, g
 from flask_socketio import emit
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 from jd import db, socketio, app
 from jd.models.tg_account import TgAccount
 from jd.models.secure_user import SecureUser
+from jd.models.department_tg_account import DepartmentTgAccount
 from jd.services.role_service.role import ROLE_SUPER_ADMIN, RoleService
 from jd.services.spider.tg import TgService
 from jd.tasks.first.tg_app import tg_app_init
@@ -26,10 +27,10 @@ def tg_account_add():
     name = get_or_exception('name', request.json, 'str')
     phone = get_or_exception('phone', request.json, 'str')
     name = name.replace(' ', '')
-    
+
     # 获取当前用户ID
     creator_id = current_user_id if current_user_id else 0
-    
+
     obj = TgAccount.query.filter_by(phone=phone).first()
     if obj and obj.status == TgAccount.StatusType.JOIN_SUCCESS:
         return success({'message': '账户已存在且已登录成功'})
@@ -190,6 +191,29 @@ def tg_account_verify():
                     'two_step': 0,
                 })
                 db.session.commit()
+
+                # 登录成功后，如果当前用户不属于全局部门，自动建立部门-TG账户关联
+                if hasattr(g, 'current_user') and g.current_user:
+                    current_user = g.current_user
+                    # 检查是否是全局部门（department_id=0），如果不是则创建关联
+                    if current_user.department_id != 0:
+                        # 检查关联是否已存在
+                        existing_relation = DepartmentTgAccount.query.filter_by(
+                            department_id=current_user.department_id,
+                            tg_user_id=str(user.id)
+                        ).first()
+
+                        if not existing_relation:
+                            # 创建部门-TG账户关联
+                            relation = DepartmentTgAccount(
+                                department_id=current_user.department_id,
+                                tg_user_id=str(user.id),
+                                created_by=current_user.id
+                            )
+                            db.session.add(relation)
+                            db.session.commit()
+                            app.logger.info(f'已为用户 {current_user.username} 的部门 {current_user.department_id} 创建TG账户关联: {user.id}')
+
                 return success({'needs_2fa': False, 'message': '登录成功'})
             else:
                 raise APIException('登录失败')
@@ -517,6 +541,29 @@ def tg_account_update_password():
                     'two_step': 1,  # 保持2FA状态
                 })
                 db.session.commit()
+
+                # 登录成功后，如果当前用户不属于全局部门，自动建立部门-TG账户关联
+                if hasattr(g, 'current_user') and g.current_user:
+                    current_user = g.current_user
+                    # 检查是否是全局部门（department_id=0），如果不是则创建关联
+                    if current_user.department_id != 0:
+                        # 检查关联是否已存在
+                        existing_relation = DepartmentTgAccount.query.filter_by(
+                            department_id=current_user.department_id,
+                            tg_user_id=str(user.id)
+                        ).first()
+
+                        if not existing_relation:
+                            # 创建部门-TG账户关联
+                            relation = DepartmentTgAccount(
+                                department_id=current_user.department_id,
+                                tg_user_id=str(user.id),
+                                created_by=current_user.id
+                            )
+                            db.session.add(relation)
+                            db.session.commit()
+                            app.logger.info(f'已为用户 {current_user.username} 的部门 {current_user.department_id} 创建TG账户关联: {user.id}')
+
                 return success({'message': '登录成功'})
             else:
                 raise APIException('2FA登录失败')

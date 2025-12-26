@@ -4,7 +4,7 @@ from io import BytesIO
 from urllib.parse import quote
 
 import pandas as pd
-from flask import request, make_response, session
+from flask import request, make_response, session, g, jsonify
 from sqlalchemy import func
 
 from jd import db
@@ -20,13 +20,16 @@ from jd.services.tag import TagService
 from jd.tasks.telegram.tg_join_group import join_group
 from jd.tasks.first.tg_new_joined_history import run_new_group_history_fetch, start_group_history_fetch
 from jd.views import get_or_exception, success
-from flask import jsonify
 from jd.views.api import api
+from jd.helpers.permission_helper import get_accessible_tg_user_ids
 
 
 @api.route('/tg/group/list/json', methods=['GET'])
 def tg_group_list_json():
-    """返回JSON格式的群组列表数据"""
+    """返回JSON格式的群组列表数据
+
+    自动应用部门过滤：非超级管理员只能查看本部门关联的TG账户的群组
+    """
     args = request.args
     account_id = get_or_exception('account_id', args, 'str', '')
     group_name = get_or_exception('group_name', args, 'str', '')
@@ -36,6 +39,29 @@ def tg_group_list_json():
     tag_ids = get_or_exception('tag_ids', args, 'str', '')
 
     query = TgGroup.query
+
+    # 部门过滤：非超级管理员只能查看本部门的群组
+    if hasattr(g, 'current_user') and g.current_user:
+        accessible_tg_user_ids = get_accessible_tg_user_ids(g.current_user)
+
+        # 如果不是None（即不是超级管理员），应用部门过滤
+        if accessible_tg_user_ids is not None:
+            if accessible_tg_user_ids:
+                # 通过TgGroupSession查找这些TG账户相关的群组
+                accessible_chat_ids = db.session.query(TgGroupSession.chat_id)\
+                    .filter(TgGroupSession.user_id.in_(accessible_tg_user_ids))\
+                    .distinct().all()
+
+                if accessible_chat_ids:
+                    chat_ids_list = [chat_id[0] for chat_id in accessible_chat_ids]
+                    query = query.filter(TgGroup.chat_id.in_(chat_ids_list))
+                else:
+                    # 部门没有关联任何群组，返回空结果
+                    query = query.filter(TgGroup.id == -1)
+            else:
+                # 部门没有关联任何TG账户，返回空结果
+                query = query.filter(TgGroup.id == -1)
+
     if account_id:
         # 只通过TgGroupSession表找到该账户所在的群组
         # 1. 先从TgAccount获取该账户的user_id
@@ -102,7 +128,7 @@ def tg_group_list_json():
             }
         })
     
-    group_id_list = [g.id for g in groups]
+    group_id_list = [grp.id for grp in groups]
     parse_tag_list = TgGroupTag.query.filter(TgGroupTag.group_id.in_(group_id_list)).all()
     parse_tag_result = collections.defaultdict(list)
     for p in parse_tag_list:
@@ -115,41 +141,41 @@ def tg_group_list_json():
     chat_postal_time_dict = {t.chat_id: t.latest_postal_time for t in chat_postal_time}
 
     # Get group status data (members and conversation count)
-    chat_id_list = [g.chat_id for g in groups]
+    chat_id_list = [grp.chat_id for grp in groups]
     group_status = TgGroupStatus.query.filter(TgGroupStatus.chat_id.in_(chat_id_list)).all()
     group_status_dict = {gs.chat_id: gs for gs in group_status}
 
     data = []
     no_chat_history_group = []
-    for g in groups:
-        parse_tag = parse_tag_result.get(g.id, [])
+    for group in groups:
+        parse_tag = parse_tag_result.get(group.id, [])
         tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
-        latest_postal_time = chat_postal_time_dict.get(g.chat_id, '')
-        
+        latest_postal_time = chat_postal_time_dict.get(group.chat_id, '')
+
         # Get status data for this group
-        status_data = group_status_dict.get(g.chat_id)
+        status_data = group_status_dict.get(group.chat_id)
         members_count = status_data.members_now if status_data else 0
         members_increment = (status_data.members_now - status_data.members_previous) if status_data and status_data.members_previous else 0
         records_count = status_data.records_now if status_data else 0
         records_increment = (status_data.records_now - status_data.records_previous) if status_data and status_data.records_previous else 0
-        
+
         d = {
-            'id': g.id,
-            'name': g.name,
-            'chat_id': g.chat_id,
-            'status': TgService.STATUS_MAP[g.status],
-            'desc': g.desc,
+            'id': group.id,
+            'name': group.name,
+            'chat_id': group.chat_id,
+            'status': TgService.STATUS_MAP[group.status],
+            'desc': group.desc,
             'tag': tag_text,
             'tag_id_list': ','.join(parse_tag) if parse_tag else '',
-            'created_at': g.created_at.strftime('%Y-%m-%d %H:%M:%S') if g.created_at else '',
-            'account_id': g.account_id,
-            'photo': g.avatar_path,
-            'title': g.title,
-            'remark': g.remark,
+            'created_at': group.created_at.strftime('%Y-%m-%d %H:%M:%S') if group.created_at else '',
+            'account_id': group.account_id,
+            'photo': group.avatar_path,
+            'title': group.title,
+            'remark': group.remark,
             'latest_postal_time': latest_postal_time.strftime('%Y-%m-%d %H:%M:%S') if latest_postal_time else '',
             'three_days_ago': 1 if latest_postal_time and latest_postal_time < (
                     datetime.datetime.now() - datetime.timedelta(days=3)) else 0,
-            'group_type': g.group_type,
+            'group_type': group.group_type,
             'members_count': members_count,
             'members_increment': members_increment,
             'records_count': records_count,
@@ -381,7 +407,7 @@ def tg_group_download():
         response.headers["Content-Disposition"] = f"attachment; filename={quote(file_name)}; filename*=utf-8''{quote(file_name)}"
         response.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return response
-    group_id_list = [g.id for g in groups]
+    group_id_list = [grp.id for grp in groups]
     parse_tag_list = TgGroupTag.query.filter(TgGroupTag.group_id.in_(group_id_list)).all()
     parse_tag_result = collections.defaultdict(list)
     for p in parse_tag_list:
@@ -395,27 +421,27 @@ def tg_group_download():
 
     data = []
     no_chat_history_group = []
-    for g in groups:
-        parse_tag = parse_tag_result.get(g.id, [])
+    for group in groups:
+        parse_tag = parse_tag_result.get(group.id, [])
         tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
-        latest_postal_time = chat_postal_time_dict.get(g.chat_id, '')
+        latest_postal_time = chat_postal_time_dict.get(group.chat_id, '')
         d = {
-            'id': g.id,
-            'name': g.name,
-            'chat_id': g.chat_id,
-            'status': TgService.STATUS_MAP[g.status],
-            'desc': g.desc,
+            'id': group.id,
+            'name': group.name,
+            'chat_id': group.chat_id,
+            'status': TgService.STATUS_MAP[group.status],
+            'desc': group.desc,
             'tag': tag_text,
             'tag_id_list': ','.join(parse_tag) if parse_tag else '',
-            'created_at': g.created_at.strftime('%Y-%m-%d %H:%M:%S') if g.created_at else '',
-            'account_id': g.account_id,
-            'photo': g.avatar_path,
-            'title': g.title,
-            'remark': g.remark,
+            'created_at': group.created_at.strftime('%Y-%m-%d %H:%M:%S') if group.created_at else '',
+            'account_id': group.account_id,
+            'photo': group.avatar_path,
+            'title': group.title,
+            'remark': group.remark,
             'latest_postal_time': latest_postal_time.strftime('%Y-%m-%d %H:%M:%S') if latest_postal_time else '',
             'three_days_ago': 1 if latest_postal_time and latest_postal_time < (
                     datetime.datetime.now() - datetime.timedelta(days=3)) else 0,
-            'group_type': g.group_type,
+            'group_type': group.group_type,
         }
         if not latest_postal_time:
             no_chat_history_group.append(d)

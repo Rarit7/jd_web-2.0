@@ -82,6 +82,14 @@
 
     <!-- 广告卡片网格 -->
     <div v-else class="ad-grid">
+      <!-- 调试信息 -->
+      <div style="padding: 10px; margin-bottom: 10px; background: #f0f0f0; border-radius: 4px;">
+        <div>📊 总记录数: {{ total }} | 当前页显示: {{ records.length }} 条</div>
+        <div style="margin-top: 5px; font-size: 12px; color: #666;">
+          页码: {{ currentPage }} | 每页: {{ pageSize }} | 总页数: {{ Math.ceil(total / pageSize) }}
+        </div>
+      </div>
+
       <el-row :gutter="4">
         <el-col
           :xs="24"
@@ -93,6 +101,8 @@
           :key="record.id"
           class="ad-card-col"
         >
+          <!-- 卡片前的调试日志 -->
+          <div style="display: none;">{{ console.log(`[DisplayTab] Rendering card ${index}:`, record) }}</div>
           <AdCard
             :record="record"
             @click="handleAdClick(record)"
@@ -177,12 +187,31 @@ const loadData = async () => {
       adTrackingApi.getTags()
     ])
 
+    console.log('[DisplayTab] API Response:', {
+      recordsRes,
+      recordsCount: recordsRes.data?.length || 0,
+      total: recordsRes.total || 0,
+      sampleRecord: recordsRes.data?.[0] || null
+    })
+
     records.value = recordsRes.data || []
     total.value = recordsRes.total || 0
     channels.value = channelsRes.data || []
     tags.value = tagsRes.data || []
+
+    console.log('[DisplayTab] Records state updated:', {
+      recordsCount: records.value.length,
+      totalRecords: total.value,
+      firstRecord: records.value[0] || null,
+      recordsArray: records.value
+    })
   } catch (error) {
     console.error('加载数据失败:', error)
+    console.error('[DisplayTab] Error details:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    })
     ElMessage.error('加载数据失败')
   } finally {
     loading.value = false
@@ -313,6 +342,8 @@ const handleCurrentChange = (page: number) => {
 
 // 生命周期
 onMounted(() => {
+  console.log('[DisplayTab] Component mounted, starting data loading...')
+  console.log('[DisplayTab] Current filters:', filters.value)
   loadData()
 })
 </script>

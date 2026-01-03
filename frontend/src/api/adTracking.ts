@@ -51,6 +51,14 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => {
     const { data } = response
+    console.log('[adTrackingApi] Response interceptor:', {
+      url: response.config.url,
+      status: response.status,
+      errCode: data.err_code,
+      errMsg: data.err_msg,
+      hasPayload: !!data.payload,
+      payloadKeys: data.payload ? Object.keys(data.payload) : []
+    })
     if (data.err_code !== 0) {
       console.error('API Error:', data.err_msg)
       return Promise.reject(new Error(data.err_msg || '请求失败'))
@@ -59,6 +67,12 @@ api.interceptors.response.use(
   },
   (error) => {
     console.error('Network Error:', error)
+    console.error('[adTrackingApi] Error details:', {
+      message: error.message,
+      config: error.config?.url,
+      status: error.response?.status,
+      responseData: error.response?.data
+    })
     return Promise.reject(error)
   }
 )
@@ -69,7 +83,15 @@ export const adTrackingApi = {
    * 获取广告记录列表
    */
   getRecords: async (params: RecordsFilterParams) => {
+    console.log('[adTrackingApi] getRecords called with params:', params)
     const response = await api.get('/records', { params })
+    console.log('[adTrackingApi] getRecords response:', {
+      total: response.payload?.total,
+      dataCount: response.payload?.data?.length,
+      pageSize: response.payload?.page_size,
+      currentPage: response.payload?.page,
+      fullResponse: response.payload
+    })
     return response.payload
   },
 

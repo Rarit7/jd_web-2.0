@@ -13,6 +13,7 @@ class TagService:
         tag_list = [{
             'id': row.id,
             'name': row.title,
+            'is_nsfw': row.is_nsfw,
         } for row in tags]
 
         return tag_list

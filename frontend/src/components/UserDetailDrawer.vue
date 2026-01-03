@@ -441,7 +441,7 @@ interface Props {
 // 定义emits
 interface Emits {
   (e: 'update:visible', value: boolean): void
-  (e: 'navigate-to-user-messages', data: { groupId: string, userId: string }): void
+  (e: 'navigate-to-user-messages', data: { groupId: string, userId: string, userGroupIds?: string[] }): void
 }
 
 const props = defineProps<Props>()
@@ -988,10 +988,14 @@ const navigateToUserMessages = (group: UserGroup) => {
   const userDetail = currentUserDetail.value
   if (!userDetail) return
 
+  // 收集用户所在所有群组的ID（用于左侧面板过滤）
+  const userGroupIds = userGroups.value.map(g => g.chat_id)
+
   // 触发父组件事件，实现页面内导航
   emit('navigate-to-user-messages', {
     groupId: group.chat_id,
-    userId: userDetail.user_id
+    userId: userDetail.user_id,
+    userGroupIds: userGroupIds  // 传递用户所在的所有群组ID，用于左侧面板过滤
   })
 
   // 关闭抽屉

@@ -184,13 +184,13 @@ const router = createRouter({
     },
     // 广告追踪
     {
-      path: '/ad-tracking',
+      path: '/ad-tracker-new',
       component: AppLayout,
       children: [
         {
           path: '',
           name: 'AdTracking',
-          component: () => import('@/views/ad-tracking/index.vue'),
+          component: () => import('@/views/ad-tracker-new/index.vue'),
           meta: {
             title: '广告追踪',
             icon: 'Warning'

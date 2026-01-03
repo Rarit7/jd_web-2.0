@@ -251,6 +251,19 @@
             </div>
           </div>
           
+          <!-- 消息导航控件（固定在顶部，来自用户详情时显示）-->
+          <div v-if="messageNavigation.visible && fromUserDetail" class="message-navigation-container">
+            <MessageNavigationControl
+              :currentPosition="messageNavigation.currentPosition"
+              :totalCount="messageNavigation.totalCount"
+              :loading="messageNavigation.loading"
+              :visible="messageNavigation.visible && fromUserDetail"
+              @prev="handlePrevMessage"
+              @next="handleNextMessage"
+              @goto="handleGotoMessage"
+            />
+          </div>
+
           <div class="chat-messages" :style="{ backgroundImage: 'url(/bg.webp)', backgroundColor: '#e8f4fd' }">
             <!-- 自定义加载遮罩层 -->
             <div v-if="messageLoading" class="custom-loading-mask">
@@ -295,6 +308,7 @@
                           fit="cover"
                           lazy
                           class="message-image"
+                          :class="{ 'nsfw-blur': isCurrentChatNsfw }"
                           :scroll-container="'.chat-messages'"
                         >
                           <template #placeholder>
@@ -473,15 +487,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { Search, User, Document, Download, Picture, ChatLineSquare, ChatRound, Loading, Film, Microphone, FolderOpened, Cpu, Paperclip } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { tgGroupsApi, type TgGroup } from '@/api/tg-groups'
 import { chatHistoryApi, type ChatMessage } from '@/api/chat-history'
 import { getTgAccountList, type TgAccount } from '@/api/tg-accounts'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { formatTime, formatDateForApi } from '@/utils/date'
 import UserDetailDrawer from '@/components/UserDetailDrawer.vue'
+import MessageNavigationControl from '@/components/MessageNavigationControl.vue'
 import {
   buildAvatarUrl,
   buildImageUrl,
@@ -501,6 +516,7 @@ import {
 
 // Route实例
 const route = useRoute()
+const router = useRouter()
 
 // 聊天数据接口，基于TgGroup扩展
 interface Chat {
@@ -519,6 +535,7 @@ interface Chat {
   photo: string
   group_type: number
   records_count: number
+  is_nsfw: boolean
 }
 
 interface FileInfo {
@@ -611,6 +628,29 @@ const exportRules = {
   ]
 }
 
+// 消息导航相关状态
+const fromUserDetail = ref(false)           // 来自用户详情标记
+const navigationUserId = ref<string>('')    // 导航的用户ID
+const navigationMode = ref(false)           // 导航模式开启标记
+const userMessageIds = ref<number[]>([])    // 用户的消息ID列表
+const currentMessageIndex = ref(0)          // 当前消息在列表中的索引
+const userGroupsWithMessages = ref<Set<string>>(new Set())  // 用户有发言的群组ID集合
+const messageNavigation = reactive({
+  visible: false,
+  currentPosition: 0,
+  totalCount: 0,
+  loading: false
+})
+
+// 计算当前选中的聊天是否为NSFW
+const isCurrentChatNsfw = computed(() => {
+  const selectedChat = chatList.value.find(chat => chat.id === selectedChatId.value)
+                       || privateChatList.value.find(chat => chat.id === selectedChatId.value)
+  const nsfw = selectedChat?.is_nsfw || false
+  console.log('[isCurrentChatNsfw] selectedChatId:', selectedChatId.value, 'selectedChat:', selectedChat, 'is_nsfw:', nsfw)
+  return nsfw
+})
+
 // 加载账户列表
 const loadAccountList = async () => {
   try {
@@ -682,7 +722,8 @@ const loadPrivateChatConversations = async () => {
         remark: '',
         photo: conv.peer_avatar || '',
         group_type: 0, // 0表示私人聊天
-        records_count: conv.message_count
+        records_count: conv.message_count,
+        is_nsfw: false // 私聊不支持NSFW标签，默认为false
       }))
     }
   } catch (error) {
@@ -916,7 +957,8 @@ const fetchChatList = async () => {
         remark: group.remark,
         photo: group.photo,
         group_type: group.group_type,
-        records_count: group.records_count || 0
+        records_count: group.records_count || 0,
+        is_nsfw: group.is_nsfw || false
       }))
 
       // 不再获取私人聊天列表，只显示群组聊天
@@ -1343,6 +1385,14 @@ const groupedChats = computed(() => {
 
   // 添加群组和频道
   filteredChats.value.forEach(chat => {
+    // 如果在导航模式，只显示用户有发言的群组
+    // userGroupsWithMessages 由 handleNavigateToUserMessages 设置（接收来自 UserDetailDrawer 的数据）
+    if (navigationMode.value && userGroupsWithMessages.value.size > 0) {
+      if (!userGroupsWithMessages.value.has(chat.chat_id)) {
+        return
+      }
+    }
+
     // 过滤掉消息数为0的群组
     if (chat.records_count > 0) {
       if (chat.group_type === 1) {
@@ -1550,6 +1600,19 @@ const selectChat = async (chatId: number) => {
 
   if (selectedChat) {
     console.log('[selectChat] selectedChat.chat_id:', selectedChat.chat_id)
+
+    // === 新增：如果在导航模式中，自动为新群组加载用户消息 ===
+    if (navigationMode.value && navigationUserId.value) {
+      // 加载该用户在新群组的消息ID列表
+      await loadUserMessageIds(selectedChat.chat_id, navigationUserId.value)
+
+      // 自动定位到用户在新群组的最后一条消息
+      // 注意：navigateToUserLastMessage 会处理消息的加载和滚动
+      await navigateToUserLastMessage(selectedChat.chat_id, navigationUserId.value)
+      return
+    }
+
+    // === 原有逻辑（非导航模式）===
     // 先获取第1页数据来计算总页数
     await fetchMessagesForPage(selectedChat.chat_id, 1)
 
@@ -1859,23 +1922,23 @@ const scrollToMessage = async (messageId: number) => {
   await nextTick()
   const targetElement = document.querySelector(`[data-message-id="${messageId}"]`)
   const chatMessagesContainer = document.querySelector('.chat-messages')
-  
+
   if (targetElement && chatMessagesContainer) {
     // 计算目标元素在容器中的位置
     const containerRect = chatMessagesContainer.getBoundingClientRect()
     const targetRect = targetElement.getBoundingClientRect()
-    
+
     // 计算需要滚动的距离（将目标消息滚动到容器中央）
     const containerCenter = containerRect.height / 2
     const targetRelativeTop = targetRect.top - containerRect.top + chatMessagesContainer.scrollTop
     const scrollToPosition = targetRelativeTop - containerCenter + targetRect.height / 2
-    
+
     // 在聊天消息容器内平滑滚动
     chatMessagesContainer.scrollTo({
       top: scrollToPosition,
       behavior: 'smooth'
     })
-    
+
     // 高亮消息
     targetElement.classList.add('highlight-message')
     setTimeout(() => {
@@ -1884,6 +1947,55 @@ const scrollToMessage = async (messageId: number) => {
     return true
   }
   return false
+}
+
+// 跨页面消息导航：自动查找消息所在的页面并加载
+const navigateToMessageByIdAcrossPages = async (messageId: number) => {
+  // 首先尝试在当前页面上滚动到消息
+  const success = await scrollToMessage(messageId)
+  if (success) {
+    return true
+  }
+
+  // 如果当前页面没有该消息，使用后端API查找消息所在的页面
+  if (!selectedChat.value) {
+    ElMessage.warning('请先选择一个群组')
+    return false
+  }
+
+  try {
+    messageNavigation.loading = true
+    const response = await chatHistoryApi.findMessagePage(selectedChat.value.chat_id, messageId, pageSize.value)
+
+    if (response.data.err_code === 0) {
+      const targetPageNumber = response.data.payload.page_number
+
+      // 跳转到目标页面
+      currentPage.value = targetPageNumber
+      await fetchMessages(selectedChat.value.chat_id)
+
+      // 加载完页面后滚动到消息
+      await nextTick()
+      const retrySuccess = await scrollToMessage(messageId)
+
+      if (!retrySuccess) {
+        // 如果还是失败，再延迟一点时间再试
+        await new Promise(resolve => setTimeout(resolve, 300))
+        await scrollToMessage(messageId)
+      }
+
+      return true
+    } else {
+      ElMessage.warning('无法定位到该消息')
+      return false
+    }
+  } catch (error) {
+    console.error('跨页面导航失败:', error)
+    ElMessage.error('定位消息失败，请重试')
+    return false
+  } finally {
+    messageNavigation.loading = false
+  }
 }
 
 // 高效的跨页面消息查找（使用后端计算页数）
@@ -2028,6 +2140,9 @@ onMounted(() => {
   fetchChatList()
   loadSearchHistory()
 
+  // 处理路由参数（用于用户消息导航）
+  initializeFromRoute()
+
   // 处理URL参数
   handleUrlParameters()
 })
@@ -2113,27 +2228,262 @@ const handleUrlParameters = () => {
   }
 }
 
+// 加载用户消息ID列表
+const loadUserMessageIds = async (groupId: string, userId: string) => {
+  try {
+    const response = await chatHistoryApi.getUserMessageIds(groupId, userId, 'asc')
+    if (response.data.err_code === 0) {
+      userMessageIds.value = response.data.payload.message_ids
+      messageNavigation.totalCount = response.data.payload.total_count
+    } else if (response.data.err_code === 2) {
+      ElMessage.warning('该用户在该群组没有消息')
+    }
+  } catch (error) {
+    console.error('加载用户消息ID失败:', error)
+  }
+}
+
+// 导航到用户的最后一条消息
+const navigateToUserLastMessage = async (groupId: string, userId: string) => {
+  messageNavigation.loading = true
+  try {
+    // 获取用户最后一条消息
+    const response = await chatHistoryApi.getUserLastMessage(groupId, userId)
+
+    if (response.data.err_code === 0) {
+      const lastMessageId = response.data.payload.message.id
+
+      // 找到消息在列表中的位置
+      const messageIndex = userMessageIds.value.indexOf(lastMessageId)
+      if (messageIndex !== -1) {
+        currentMessageIndex.value = messageIndex
+        messageNavigation.currentPosition = messageIndex + 1
+      }
+
+      // === 新增：查找消息所在的页数并加载该页 ===
+      try {
+        const pageResponse = await chatHistoryApi.findMessagePage(groupId, lastMessageId, pageSize.value)
+        if (pageResponse.data.err_code === 0) {
+          const pageNumber = pageResponse.data.payload.page_number
+          currentPage.value = pageNumber
+          console.log(`[navigateToUserLastMessage] 跳转到第 ${pageNumber} 页加载消息...`)
+          // 加载该页的消息
+          await fetchMessages(groupId)
+        }
+      } catch (pageError) {
+        console.warn('[navigateToUserLastMessage] 查找消息页数失败，尝试加载第一页:', pageError)
+        // 如果查找页数失败，加载第一页
+        currentPage.value = 1
+        await fetchMessages(groupId)
+      }
+
+      // 等待DOM更新后再滚动
+      await nextTick()
+      const success = await scrollToMessage(lastMessageId)
+
+      if (!success) {
+        // 如果第一次没成功，再试一次
+        console.log('[navigateToUserLastMessage] 第一次滚动失败，重试...')
+        await new Promise(resolve => setTimeout(resolve, 500))
+        await scrollToMessage(lastMessageId)
+      }
+
+      // 显示导航控件
+      messageNavigation.visible = true
+    } else if (response.data.err_code === 2) {
+      ElMessage.warning('该用户在该群组没有消息')
+    }
+  } catch (error) {
+    console.error('导航到最后一条消息失败:', error)
+    ElMessage.error('导航失败，请重试')
+  } finally {
+    messageNavigation.loading = false
+  }
+}
+
+// 处理消息导航控件事件 - 上一条消息
+const handlePrevMessage = async () => {
+  if (currentMessageIndex.value > 0) {
+    currentMessageIndex.value--
+    const messageId = userMessageIds.value[currentMessageIndex.value]
+
+    // 使用跨页面导航，自动加载消息所在的页面
+    const success = await navigateToMessageByIdAcrossPages(messageId)
+    if (success) {
+      messageNavigation.currentPosition = currentMessageIndex.value + 1
+    } else {
+      // 如果导航失败，恢复索引
+      currentMessageIndex.value++
+    }
+  }
+}
+
+// 处理消息导航控件事件 - 下一条消息
+const handleNextMessage = async () => {
+  if (currentMessageIndex.value < userMessageIds.value.length - 1) {
+    currentMessageIndex.value++
+    const messageId = userMessageIds.value[currentMessageIndex.value]
+
+    // 使用跨页面导航，自动加载消息所在的页面
+    const success = await navigateToMessageByIdAcrossPages(messageId)
+    if (success) {
+      messageNavigation.currentPosition = currentMessageIndex.value + 1
+    } else {
+      // 如果导航失败，恢复索引
+      currentMessageIndex.value--
+    }
+  }
+}
+
+// 处理消息导航控件事件 - 跳转到指定位置
+const handleGotoMessage = async (position: number) => {
+  if (position >= 1 && position <= userMessageIds.value.length) {
+    currentMessageIndex.value = position - 1
+    const messageId = userMessageIds.value[currentMessageIndex.value]
+
+    // 使用跨页面导航，自动加载消息所在的页面
+    const success = await navigateToMessageByIdAcrossPages(messageId)
+    if (success) {
+      messageNavigation.currentPosition = position
+    } else {
+      // 如果导航失败，恢复索引
+      currentMessageIndex.value = -1
+    }
+  } else {
+    ElMessage.warning('无效的位置')
+  }
+}
+
 // 处理用户详情抽屉的导航事件
-const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, userId: string }) => {
+const handleNavigateToUserMessages = ({ groupId, userId, userGroupIds }: { groupId: string, userId: string, userGroupIds?: string[] }) => {
+  // 设置标记
+  fromUserDetail.value = true
+  navigationUserId.value = userId
+  navigationMode.value = true
+
+  // 设置用户有发言的群组ID集合（用于左侧面板过滤）
+  if (userGroupIds && userGroupIds.length > 0) {
+    userGroupsWithMessages.value = new Set(userGroupIds)
+    console.log(`[handleNavigateToUserMessages] 设置用户有发言的群组: ${userGroupIds.join(', ')}`)
+  }
+
   // 查找目标群组
   const targetGroup = chatList.value.find(chat => chat.chat_id === groupId)
-  
+
   if (targetGroup) {
-    // 设置用户ID搜索
-    userIdSearchText.value = userId
-    
+    // 先加载用户的消息ID列表
+    loadUserMessageIds(groupId, userId)
+
     // 选择目标群组
     selectChat(targetGroup.id)
-    
+
+    // 设置路由参数
+    router.push({
+      path: '/chat-history',
+      query: {
+        group_id: groupId,
+        user_id: userId,
+        from_user_detail: 'true',
+        navigate_to_last: 'true'
+      }
+    })
+
     ElMessage.success(`已切换到用户 ${userId} 在群组 "${targetGroup.title || targetGroup.name}" 的消息记录`)
   } else {
     ElMessage.warning('未找到目标群组')
   }
 }
+
+// 加载用户在所有群组中有发言的群组ID列表
+const loadUserGroupsWithMessages = async (userId: string) => {
+  try {
+    console.log(`[loadUserGroupsWithMessages] 开始加载用户 ${userId} 的群组列表...`)
+    const groupsSet = new Set<string>()
+
+    // 遍历所有群组，检查用户是否有消息
+    for (const chat of chatList.value) {
+      try {
+        const response = await chatHistoryApi.getUserMessageIds(chat.chat_id, userId, 'asc')
+        // 检查响应状态（err_code=0表示有消息，err_code=2表示没有消息）
+        if (response.data.err_code === 0 && response.data.payload.total_count > 0) {
+          groupsSet.add(chat.chat_id)
+          console.log(`  ✓ 用户在群组 ${chat.title || chat.name} 有 ${response.data.payload.total_count} 条消息`)
+        } else if (response.data.err_code === 2) {
+          // err_code=2 表示用户在该群组没有消息，这是正常响应，不是错误
+          console.log(`  - 用户在群组 ${chat.title || chat.name} 没有消息`)
+        }
+      } catch (error) {
+        // 忽略单个群组的错误，继续处理其他群组
+        console.warn(`  ✗ 检查群组 ${chat.title || chat.name} 失败:`, error)
+      }
+    }
+
+    userGroupsWithMessages.value = groupsSet
+    console.log(`[loadUserGroupsWithMessages] 用户有发言的群组总数: ${groupsSet.size}`)
+  } catch (error) {
+    console.error('[loadUserGroupsWithMessages] 加载失败:', error)
+  }
+}
+
+// 在路由初始化时处理参数
+const initializeFromRoute = async () => {
+  const groupId = route.query.group_id as string
+  const userId = route.query.user_id as string
+  const navigateToLast = route.query.navigate_to_last as string
+  const userGroupIdsStr = route.query.user_group_ids as string
+
+  if (groupId && userId && navigateToLast === 'true') {
+    fromUserDetail.value = true
+    navigationUserId.value = userId
+    navigationMode.value = true
+
+    // 从路由参数中恢复用户有发言的群组ID列表（用于左侧面板过滤）
+    if (userGroupIdsStr) {
+      const userGroupIds = userGroupIdsStr.split(',').filter(id => id.trim())
+      if (userGroupIds.length > 0) {
+        userGroupsWithMessages.value = new Set(userGroupIds)
+        console.log(`[initializeFromRoute] 从路由参数恢复用户群组IDs: ${userGroupIds.join(', ')}`)
+      }
+    }
+
+    // 等待群组列表加载完成
+    const ensureGroupLoaded = () => {
+      return new Promise<void>((resolve) => {
+        const checkGroup = () => {
+          const targetGroup = chatList.value.find(chat => chat.chat_id === groupId)
+          if (targetGroup) {
+            // 群组找到，选择它
+            selectedChatId.value = targetGroup.id
+            messageList.value = []
+            resolve()
+          } else if (chatList.value.length > 0) {
+            // 群组列表已加载但未找到目标群组
+            console.warn(`未找到群组 ID: ${groupId}`)
+            resolve()
+          } else {
+            // 群组列表还没加载，继续等待
+            setTimeout(checkGroup, 100)
+          }
+        }
+        checkGroup()
+      })
+    }
+
+    await ensureGroupLoaded()
+
+    // 加载用户在目标群组的消息ID列表
+    // 注：已移除 loadUserGroupsWithMessages 调用，因为用户选择的群组数据已在 UserDetailDrawer 中通过 loadUserStats API 获取
+    // 避免不必要的 13+ 次 API 调用来验证每个群组中是否有用户消息
+    await loadUserMessageIds(groupId, userId)
+
+    // 自动导航到最后一条消息
+    await navigateToUserLastMessage(groupId, userId)
+  }
+}
 </script>
 
 
-<style scoped>
+<style scoped lang="scss">
 .chat-content {
   height: 100%;
   padding: 0;
@@ -2433,6 +2783,7 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   height: 100%;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .chat-detail-card :deep(.el-card__body) {
@@ -2448,6 +2799,19 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   flex-shrink: 0;
   padding: 16px 20px;
   background-color: #fff;
+}
+
+/* 消息导航控制容器 - 相对于 chat-detail-card 绝对定位，始终可见 */
+.message-navigation-container {
+  position: absolute;
+  top: 56px;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background-color: #fff;
+  border-bottom: 1px solid #e4e7ed;
+  padding: 8px 16px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .chat-title {
@@ -2489,6 +2853,7 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px;
+  padding-top: 80px;
   background-color: #f5f7fa;
   background-repeat: no-repeat;
   background-position: center center;
@@ -2608,6 +2973,11 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   border-radius: 8px;
   cursor: pointer;
 }
+
+// 重要：预览大图时不应用模糊
+// Element Plus的图片预览使用独立DOM结构(.el-image-viewer)
+// 预览器中的图片不会继承nsfw-blur类，因此自动清晰显示
+// NSFW模糊样式定义在文件末尾的全局 <style> 块中
 
 .image-grid.images-1 .message-image {
   height: 150px;
@@ -3042,4 +3412,130 @@ const handleNavigateToUserMessages = ({ groupId, userId }: { groupId: string, us
   justify-content: flex-end;
 }
 
+/* 消息导航控件容器 */
+:deep(.message-navigation-control) {
+  position: relative;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #f0f2f5 100%);
+  border-left: 3px solid #409eff;
+  border-bottom: 2px solid #d9d9d9;
+  margin-bottom: 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+:deep(.message-navigation-control):hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.message-navigation-control .el-button-group) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+:deep(.message-navigation-control .el-button) {
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+  background-color: #ffffff;
+  border-color: #dcdfe6;
+  color: #333;
+}
+
+:deep(.message-navigation-control .el-button:not(.is-disabled):hover) {
+  background-color: #e6f7ff;
+  border-color: #409eff;
+  color: #409eff;
+  transform: translateY(-1px);
+}
+
+:deep(.message-navigation-control .el-button.is-disabled) {
+  opacity: 0.6;
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+:deep(.message-navigation-control .el-input) {
+  width: 100px;
+  margin: 0 4px;
+}
+
+:deep(.message-navigation-control .el-input__wrapper) {
+  background-color: #ffffff;
+  border: 1px solid #dcdfe6;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  transition: all 0.3s ease;
+}
+
+:deep(.message-navigation-control .el-input__wrapper:hover) {
+  border-color: #409eff;
+  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.1);
+}
+
+:deep(.message-navigation-control .el-input__wrapper:focus-within) {
+  border-color: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15);
+}
+
+/* 消息导航按钮动画效果 */
+:deep(.message-navigation-control .el-button:not(.is-disabled):active) {
+  transform: translateY(1px);
+}
+
+/* 位置显示禁用样式 */
+:deep(.message-navigation-control .el-button.is-disabled:nth-child(2)) {
+  background-color: #f0f2f5;
+  cursor: default;
+  opacity: 1;
+  font-weight: 500;
+  color: #303133;
+}
+
+/* 高亮消息动画 */
+@keyframes highlight {
+  0% {
+    background-color: #fff7e6;
+    box-shadow: 0 0 0 3px rgba(255, 166, 64, 0.2);
+  }
+  25% {
+    background-color: #ffd666;
+    box-shadow: 0 0 0 6px rgba(255, 166, 64, 0.1);
+  }
+  50% {
+    background-color: #ffd666;
+    box-shadow: 0 0 0 3px rgba(255, 166, 64, 0.2);
+  }
+  75% {
+    background-color: #fff7e6;
+    box-shadow: 0 0 0 2px rgba(255, 166, 64, 0.15);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 rgba(255, 166, 64, 0);
+  }
+}
+
+.message-item.highlight-message {
+  animation: highlight 3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 6px;
+}
+
+</style>
+
+<!-- 全局样式：NSFW图片模糊效果 -->
+<style>
+/* 仅应用到缩略图，排除预览器中的大图 */
+/* Element Plus 预览器中的图片有 .el-image-viewer__img 类 */
+.message-image.nsfw-blur img:not(.el-image-viewer__img) {
+  filter: blur(20px) !important;
+  transition: filter 0.3s ease;
+}
+
+.message-image.nsfw-blur:hover img:not(.el-image-viewer__img) {
+  filter: blur(8px) !important;
+}
 </style>

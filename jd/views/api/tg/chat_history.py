@@ -519,16 +519,18 @@ def tg_chat_room_history_by_group(group_id):
                                                           search_content, page, page_size, search_account_id_list,
                                                           message_id, reply_to_msg_id, show_all)
         total_pages = (total_records + page_size - 1) // page_size
-        
-        # 获取群组信息
-        chat_room = TgGroup.query.filter_by(chat_id=group_id, status=TgGroup.StatusType.JOIN_SUCCESS).first()
+
+        # 获取群组信息（允许JOIN_SUCCESS和INVALID_LINK状态的群组显示聊天记录）
+        chat_room = TgGroup.query.filter_by(chat_id=group_id).filter(
+            TgGroup.status.in_([TgGroup.StatusType.JOIN_SUCCESS, TgGroup.StatusType.INVALID_LINK])
+        ).first()
         if not chat_room:
             return jsonify({
                 'err_code': 1,
-                'err_msg': '群组不存在或未成功加入',
+                'err_msg': '群组不存在或不可访问',
                 'payload': {}
             }), 404
-        
+
         group_info = {'chat_id': chat_room.chat_id, 'group_name': f'{chat_room.name}-{chat_room.title}'}
         
         # 获取所有用户头像信息和关注状态
@@ -985,6 +987,16 @@ def tg_chat_room_history_by_user_in_group(group_id, user_id):
                 'chat_id': r.chat_id
             })
 
+        # 获取用户最后一条消息的ID（新增）
+        last_message = TgGroupChatHistory.query.filter_by(
+            chat_id=group_id,
+            user_id=user_id
+        ).order_by(TgGroupChatHistory.postal_time.desc()).first()
+        last_message_id = last_message.id if last_message else None
+
+        # 获取用户在该群组的消息总数（新增）
+        user_message_count = total_records
+
         return jsonify({
             'err_code': 0,
             'err_msg': '',
@@ -994,7 +1006,9 @@ def tg_chat_room_history_by_user_in_group(group_id, user_id):
                 'current_page': page,
                 'total_records': total_records,
                 'group_info': group_info,
-                'user_info': user_details
+                'user_info': user_details,
+                'last_message_id': last_message_id,  # 新增字段
+                'user_message_count': user_message_count  # 新增字段
             }
         })
         
@@ -1061,6 +1075,165 @@ def find_message_page(group_id, message_id):
             'err_msg': str(e),
             'payload': {}
         }), 500
+
+@api.route('/tg/chat_room/history/user_last_message/<group_id>/<user_id>', methods=['GET'])
+def get_user_last_message(group_id, user_id):
+    """获取用户在指定群组的最后一条消息"""
+    try:
+        # 查询该用户在该群组的最后一条消息（按时间倒序）
+        last_message = TgGroupChatHistory.query.filter_by(
+            chat_id=group_id,
+            user_id=user_id
+        ).order_by(TgGroupChatHistory.postal_time.desc()).first()
+
+        if not last_message:
+            return jsonify({
+                'err_code': 2,
+                'err_msg': '用户在该群组没有消息',
+                'payload': {}
+            }), 200
+
+        # 统计该用户在该群组的总消息数
+        total_count = TgGroupChatHistory.query.filter_by(
+            chat_id=group_id,
+            user_id=user_id
+        ).count()
+
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '',
+            'payload': {
+                'message': {
+                    'id': last_message.id,
+                    'message_id': last_message.message_id,
+                    'message': last_message.message,
+                    'postal_time': last_message.postal_time.strftime('%Y-%m-%d %H:%M:%S') if last_message.postal_time else '',
+                    'nickname': last_message.nickname
+                },
+                'total_count': total_count
+            }
+        })
+
+    except Exception as e:
+        logger.error(f'获取用户最后一条消息失败: {e}')
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
+
+
+@api.route('/tg/chat_room/history/user_message_ids/<group_id>/<user_id>', methods=['GET'])
+def get_user_message_ids(group_id, user_id):
+    """获取用户在指定群组的所有消息ID列表，用于导航"""
+    try:
+        order = request.args.get('order', 'asc')  # 排序方式：asc 或 desc，默认 asc
+
+        # 验证排序参数
+        if order not in ['asc', 'desc']:
+            order = 'asc'
+
+        # 查询该用户在该群组的所有消息ID（按时间排序）
+        sort_order = TgGroupChatHistory.postal_time.asc() if order == 'asc' else TgGroupChatHistory.postal_time.desc()
+
+        messages = TgGroupChatHistory.query.filter_by(
+            chat_id=group_id,
+            user_id=user_id
+        ).order_by(sort_order).all()
+
+        if not messages:
+            return jsonify({
+                'err_code': 2,
+                'err_msg': '用户在该群组没有消息',
+                'payload': {}
+            }), 200
+
+        message_ids = [msg.id for msg in messages]
+
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '',
+            'payload': {
+                'message_ids': message_ids,
+                'total_count': len(message_ids)
+            }
+        })
+
+    except Exception as e:
+        logger.error(f'获取用户消息ID列表失败: {e}')
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
+
+
+@api.route('/tg/chat_room/history/user_message_position/<group_id>/<user_id>/<int:message_id>', methods=['GET'])
+def get_user_message_position(group_id, user_id, message_id):
+    """获取指定消息在用户消息列表中的位置（用于显示'第x条/共x条'）"""
+    try:
+        # 查找目标消息
+        target_message = TgGroupChatHistory.query.filter_by(
+            chat_id=group_id,
+            user_id=user_id,
+            id=message_id
+        ).first()
+
+        if not target_message:
+            return jsonify({
+                'err_code': 1,
+                'err_msg': '消息不存在',
+                'payload': {}
+            }), 404
+
+        # 获取当前消息之前的消息数量
+        prev_count = TgGroupChatHistory.query.filter(
+            TgGroupChatHistory.chat_id == group_id,
+            TgGroupChatHistory.user_id == user_id,
+            TgGroupChatHistory.postal_time < target_message.postal_time
+        ).count()
+
+        position = prev_count + 1
+
+        # 获取用户在该群组的总消息数
+        total = TgGroupChatHistory.query.filter_by(
+            chat_id=group_id,
+            user_id=user_id
+        ).count()
+
+        # 获取上一条消息
+        prev_message = TgGroupChatHistory.query.filter(
+            TgGroupChatHistory.chat_id == group_id,
+            TgGroupChatHistory.user_id == user_id,
+            TgGroupChatHistory.postal_time < target_message.postal_time
+        ).order_by(TgGroupChatHistory.postal_time.desc()).first()
+
+        # 获取下一条消息
+        next_message = TgGroupChatHistory.query.filter(
+            TgGroupChatHistory.chat_id == group_id,
+            TgGroupChatHistory.user_id == user_id,
+            TgGroupChatHistory.postal_time > target_message.postal_time
+        ).order_by(TgGroupChatHistory.postal_time.asc()).first()
+
+        return jsonify({
+            'err_code': 0,
+            'err_msg': '',
+            'payload': {
+                'position': position,
+                'total': total,
+                'prev_message_id': prev_message.id if prev_message else None,
+                'next_message_id': next_message.id if next_message else None
+            }
+        })
+
+    except Exception as e:
+        logger.error(f'获取消息位置失败: {e}')
+        return jsonify({
+            'err_code': 1,
+            'err_msg': str(e),
+            'payload': {}
+        }), 500
+
 
 @api.route('/tg/chat_room/history/download', methods=['GET'])
 def tg_chat_room_history_download():

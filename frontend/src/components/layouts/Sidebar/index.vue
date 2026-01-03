@@ -141,7 +141,7 @@ const routes = computed(() => {
           }
         },
         {
-          path: '/ad-tracking',
+          path: '/ad-tracker-new',
           name: 'AdTracking',
           meta: {
             title: '广告追踪',

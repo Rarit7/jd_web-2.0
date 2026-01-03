@@ -4,6 +4,7 @@ export interface Tag {
   id: number
   name: string
   color: string
+  is_nsfw: boolean
   status: string
   created_at: string
   updated_at: string

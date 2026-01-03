@@ -23,7 +23,7 @@ export const STORAGE_KEYS = {
  */
 export const DEFAULT_SETTINGS = {
   /** 系统标题 */
-  title: 'JD Web Admin',
+  title: '云端猎毒',
   /** 系统版本 */
   version: '1.0.0',
   /** 系统描述 */

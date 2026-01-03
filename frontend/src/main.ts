@@ -3,8 +3,12 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router/index'
 
-// Import Element Plus JS API components styles (MessageBox, Message, Notification)
+// Import Element Plus CSS theme
+import 'element-plus/dist/index.css'
+
+// Import global styles
 import './styles/element-plus.scss'
+import './styles/index.scss'
 
 const app = createApp(App)
 const pinia = createPinia()

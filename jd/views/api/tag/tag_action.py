@@ -20,6 +20,7 @@ def tag_list():
             'id': row.id,
             'name': row.title,
             'color': row.color if hasattr(row, 'color') and row.color else '#409EFF',
+            'is_nsfw': row.is_nsfw if hasattr(row, 'is_nsfw') else False,
             'status': TagService.StatusMap[row.status],
             'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             'updated_at': row.updated_at.strftime('%Y-%m-%d %H:%M:%S'),
@@ -84,9 +85,11 @@ def tag_add():
             data = request.get_json()
             name = data.get('name')
             color = data.get('color', '#409EFF')
+            is_nsfw = data.get('is_nsfw', False)
         else:
             name = request.form.get('name')
             color = request.form.get('color', '#409EFF')
+            is_nsfw = request.form.get('is_nsfw', 'false').lower() == 'true'
             
         if not name or not name.strip():
             return jsonify({
@@ -104,6 +107,7 @@ def tag_add():
                 # 重新激活已删除的标签
                 existing_tag.status = ResultTag.StatusType.VALID
                 existing_tag.color = color
+                existing_tag.is_nsfw = is_nsfw
             else:
                 return jsonify({
                     'err_code': 1,
@@ -112,7 +116,7 @@ def tag_add():
                 }), 400
         else:
             # 创建新标签
-            tag = ResultTag(title=name, color=color)
+            tag = ResultTag(title=name, color=color, is_nsfw=is_nsfw)
             db.session.add(tag)
         
         db.session.commit()
@@ -148,10 +152,13 @@ def tag_edit():
             tag_id = data.get('id')
             name = data.get('name')
             color = data.get('color')
+            is_nsfw = data.get('is_nsfw')
         else:
             tag_id = request.form.get('id')
             name = request.form.get('name')
             color = request.form.get('color')
+            is_nsfw_str = request.form.get('is_nsfw')
+            is_nsfw = is_nsfw_str.lower() == 'true' if is_nsfw_str else None
 
         logger.info(f"tag_edit - Parsed params: id={tag_id}, name={name}, color={color}")
 
@@ -199,6 +206,8 @@ def tag_edit():
         tag.title = name
         if color is not None:
             tag.color = color
+        if is_nsfw is not None:
+            tag.is_nsfw = is_nsfw
         db.session.commit()
         
         return jsonify({

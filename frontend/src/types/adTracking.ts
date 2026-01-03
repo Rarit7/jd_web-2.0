@@ -370,3 +370,279 @@ export interface Pagination {
   pageSize: number
   total: number
 }
+
+// ==================== 广告追踪记录管理类型 ====================
+
+/**
+ * 标签信息（包含关键词）
+ */
+export interface TagInfo {
+  tag_id: number
+  tag_name: string
+  color: string
+  keywords: string[]
+}
+
+/**
+ * 广告记录
+ */
+export interface AdTrackingRecord {
+  id: number
+  channel_id: number
+  channel_name: string
+  channel_title?: string
+  message_id: number
+  sender_id: number
+  sender_nickname?: string
+  message_text: string | null
+  image_url: string
+  send_time: string
+  trigger_keyword: string
+  trigger_tag_id: number | null
+  tag_ids?: number[]
+  tag_info?: TagInfo[]
+  process_batch_id: string | null
+  is_processed: boolean
+  created_at: string
+  updated_at: string
+  formatted_send_time?: string
+}
+
+/**
+ * 广告记录详情
+ */
+export interface AdTrackingRecordDetail extends AdTrackingRecord {
+  batch_info?: AdTrackingBatch
+}
+
+/**
+ * 处理批次
+ */
+export interface AdTrackingBatch {
+  id: string
+  channel_id: number
+  selected_tag_ids: number[]
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled'
+  total_messages: number
+  processed_messages: number
+  created_messages: number
+  progress: number
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  error_message: string | null
+  task_info?: TaskInfo
+}
+
+/**
+ * Celery 任务信息
+ */
+export interface TaskInfo {
+  task_id: string
+  state: string
+  info: {
+    current: number
+    total: number
+    batch_id?: string
+  }
+}
+
+/**
+ * 频道信息
+ */
+export interface AdTrackingChannel {
+  id: number
+  name: string
+  chat_id: string
+  group_type: number
+  status: number
+  title: string
+  last_active: string | null
+  description: string | null
+}
+
+/**
+ * 标签信息
+ */
+export interface AdTrackingTag {
+  id: number
+  tag_id: number
+  keyword: string
+  tag_name: string
+  is_active: boolean
+  auto_focus: boolean
+  keyword_count: number
+}
+
+/**
+ * 标签选项（用于 Transfer 组件）
+ */
+export interface TagOption {
+  id: number
+  keyword: string
+  disabled?: boolean
+}
+
+/**
+ * 关联记录
+ */
+export interface RelatedRecord {
+  id: number
+  channel_name: string
+  trigger_keyword: string
+  send_time: string
+  is_processed: boolean
+  message_text: string | null
+  image_url: string
+}
+
+/**
+ * 记录筛选参数
+ */
+export interface RecordsFilterParams extends Pagination {
+  channel_id?: number
+  trigger_keyword?: string
+  trigger_tag_id?: number
+  process_batch_id?: string
+  is_processed?: boolean
+}
+
+/**
+ * 频道查询参数
+ */
+export interface ChannelsQueryParams {
+  include_inactive?: boolean
+  search?: string
+}
+
+/**
+ * 标签查询参数
+ */
+export interface TagsQueryParams {
+  show_inactive?: boolean
+  search?: string
+}
+
+/**
+ * 历史记录查询参数
+ */
+export interface HistoryQueryParams extends Pagination {
+  channel_id?: number
+  status?: string
+}
+
+/**
+ * 开始处理参数
+ */
+export interface StartProcessingParams {
+  channel_id: number
+  selected_tag_ids: number[]
+}
+
+/**
+ * 导出记录参数
+ */
+export interface ExportRecordsParams {
+  format?: 'excel' | 'csv'
+  channel_id?: number
+  trigger_tag_id?: number
+  is_processed?: boolean
+}
+
+/**
+ * 统计信息
+ */
+export interface StatisticsData {
+  total_records: number
+  channel_stats: Array<{
+    channel_id: number
+    channel_name: string
+    record_count: number
+  }>
+  keyword_stats: Array<{
+    keyword: string
+    count: number
+  }>
+}
+
+/**
+ * 批次摘要
+ */
+export interface BatchSummary {
+  batch_id: string
+  channel_name: string
+  total_messages: number
+  processed_messages: number
+  created_records: number
+  duration: string
+  status: string
+  error_message?: string
+}
+
+/**
+ * 频道处理状态
+ */
+export interface ChannelProcessingStatus {
+  channel_id: number
+  is_processing: boolean
+  current_batch_id?: string
+  last_processed_at?: string
+}
+
+// ==================== API 响应类型映射 ====================
+
+/**
+ * 广告记录响应
+ */
+export type RecordsResponse = ApiResponse<AdTrackingRecord[]>
+
+/**
+ * 记录详情响应
+ */
+export type RecordDetailResponse = ApiResponse<AdTrackingRecordDetail>
+
+/**
+ * 频道响应
+ */
+export type ChannelsResponse = ApiResponse<AdTrackingChannel[]>
+
+/**
+ * 标签响应
+ */
+export type TagsResponse = ApiResponse<AdTrackingTag[]>
+
+/**
+ * 批次响应
+ */
+export type BatchResponse = ApiResponse<AdTrackingBatch>
+
+/**
+ * 历史记录响应
+ */
+export type HistoryResponse = ApiResponse<AdTrackingBatch[]>
+
+/**
+ * 统计响应
+ */
+export type StatisticsResponse = ApiResponse<StatisticsData>
+
+/**
+ * 批次摘要响应
+ */
+export type BatchSummaryResponse = ApiResponse<BatchSummary>
+
+/**
+ * 处理状态响应
+ */
+export type ProcessingStatusResponse = ApiResponse<ChannelProcessingStatus>
+
+/**
+ * 关联记录响应
+ */
+export type RelatedRecordsResponse = ApiResponse<RelatedRecord[]>
+
+/**
+ * 导出响应
+ */
+export type ExportResponse = Blob

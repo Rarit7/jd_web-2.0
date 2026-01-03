@@ -1,205 +1,292 @@
 /**
- * 广告追踪 API 服务
+ * 广告追踪记录管理 API 服务
  */
-import request from './request'
+import axios from 'axios'
 import type {
-  ApiResponse,
-  AdTracking,
-  AdTrackingDetail,
-  AdTrackingListParams,
-  AdTrackingListResponse,
-  SearchByDomainParams,
-  SearchByDomainResponse,
-  StatsParams,
-  StatsResponse,
-  ExecuteTaskParams,
-  ExecuteTaskResponse,
-  TaskStatusResponse,
-  AddTagsParams,
-  AddTagsResponse,
-  DeleteResponse
+  AdTrackingRecord,
+  AdTrackingRecordDetail,
+  AdTrackingChannel,
+  AdTrackingTag,
+  AdTrackingBatch,
+  RelatedRecord,
+  RecordsFilterParams,
+  ChannelsQueryParams,
+  TagsQueryParams,
+  HistoryQueryParams,
+  StartProcessingParams,
+  ExportRecordsParams,
+  StatisticsData,
+  BatchSummary,
+  ChannelProcessingStatus
 } from '@/types/adTracking'
 
-const BASE_PATH = '/ad-tracking'
+// API 基础配置
+const API_BASE_URL = '/api/ad-tracking'
 
-/**
- * 获取广告追踪列表
- */
-export function getAdTrackingList(params: AdTrackingListParams) {
-  return request<ApiResponse<AdTrackingListResponse>>({
-    url: `${BASE_PATH}/list`,
-    method: 'get',
-    params
-  })
-}
+// 创建 axios 实例
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
 
-/**
- * 获取广告追踪详情
- */
-export function getAdTrackingDetail(trackingId: number) {
-  return request<ApiResponse<AdTrackingDetail>>({
-    url: `${BASE_PATH}/${trackingId}`,
-    method: 'get'
-  })
-}
+// 请求拦截器
+api.interceptors.request.use(
+  (config) => {
+    // 可以在这里添加认证 token
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
 
-/**
- * 按域名搜索
- */
-export function searchByDomain(params: SearchByDomainParams) {
-  return request<ApiResponse<SearchByDomainResponse>>({
-    url: `${BASE_PATH}/search-by-domain`,
-    method: 'get',
-    params
-  })
-}
+// 响应拦截器
+api.interceptors.response.use(
+  (response) => {
+    const { data } = response
+    if (data.err_code !== 0) {
+      console.error('API Error:', data.err_msg)
+      return Promise.reject(new Error(data.err_msg || '请求失败'))
+    }
+    return data
+  },
+  (error) => {
+    console.error('Network Error:', error)
+    return Promise.reject(error)
+  }
+)
 
-/**
- * 获取统计信息
- */
-export function getStats(params?: StatsParams) {
-  return request<ApiResponse<StatsResponse>>({
-    url: `${BASE_PATH}/stats`,
-    method: 'get',
-    params
-  })
-}
-
-/**
- * 执行追踪任务
- */
-export function executeTask(data: ExecuteTaskParams) {
-  return request<ApiResponse<ExecuteTaskResponse>>({
-    url: `${BASE_PATH}/task/execute`,
-    method: 'post',
-    data
-  })
-}
-
-/**
- * 查询任务状态
- */
-export function getTaskStatus(taskId: string) {
-  return request<ApiResponse<TaskStatusResponse>>({
-    url: `${BASE_PATH}/task/status/${taskId}`,
-    method: 'get'
-  })
-}
-
-/**
- * 为追踪记录添加标签
- */
-export function addTags(trackingId: number, data: AddTagsParams) {
-  return request<ApiResponse<AddTagsResponse>>({
-    url: `${BASE_PATH}/tags/${trackingId}`,
-    method: 'post',
-    data
-  })
-}
-
-/**
- * 删除追踪记录的标签
- */
-export function deleteTag(trackingId: number, tagId: number) {
-  return request<ApiResponse<DeleteResponse>>({
-    url: `${BASE_PATH}/tags/${trackingId}/${tagId}`,
-    method: 'delete'
-  })
-}
-
-/**
- * 删除广告追踪记录
- */
-export function deleteAdTracking(trackingId: number) {
-  return request<ApiResponse<DeleteResponse>>({
-    url: `${BASE_PATH}/${trackingId}`,
-    method: 'delete'
-  })
-}
-
-/**
- * 更新商家名称
- */
-export function updateMerchantName(trackingId: number, merchantName: string) {
-  return request<ApiResponse<{ message: string; merchant_name: string | null }>>({
-    url: `${BASE_PATH}/${trackingId}/merchant-name`,
-    method: 'put',
-    data: { merchant_name: merchantName }
-  })
-}
-
-// ==================== 高价值信息 API ====================
-
-interface HighValueMessageListParams {
-  page?: number
-  page_size?: number
-  user_id?: string
-  chat_id?: string
-  is_high_priority?: number
-  start_date?: string
-  end_date?: string
-  search?: string
-  sort_by?: 'importance_score' | 'publish_time' | 'created_at'
-  sort_order?: 'asc' | 'desc'
-}
-
-interface HighValueMessageListResponse {
-  data: any[]
-  total: number
-  page: number
-  page_size: number
-  total_pages: number
-}
-
-/**
- * 获取高价值信息列表
- */
-export function getHighValueMessages(params: HighValueMessageListParams) {
-  return request<ApiResponse<HighValueMessageListResponse>>({
-    url: `${BASE_PATH}/high-value-messages`,
-    method: 'get',
-    params
-  })
-}
-
-/**
- * 获取单个高价值信息详情
- */
-export function getHighValueMessage(messageId: number) {
-  return request<ApiResponse<{ data: any }>>({
-    url: `${BASE_PATH}/high-value-messages/${messageId}`,
-    method: 'get'
-  })
-}
-
-/**
- * 删除高价值信息
- */
-export function deleteHighValueMessage(messageId: number) {
-  return request<ApiResponse<null>>({
-    url: `${BASE_PATH}/high-value-messages/${messageId}`,
-    method: 'delete'
-  })
-}
-
-/**
- * 导出API对象（兼容旧代码风格）
- */
+// 广告记录 API
 export const adTrackingApi = {
-  getList: getAdTrackingList,
-  getDetail: getAdTrackingDetail,
-  searchByDomain,
-  getStats,
-  executeTask,
-  getTaskStatus,
-  addTags,
-  deleteTag,
-  delete: deleteAdTracking,
-  updateMerchantName,
-  // 高价值信息 API
-  getHighValueMessages,
-  getHighValueMessage,
-  deleteHighValueMessage
+  /**
+   * 获取广告记录列表
+   */
+  getRecords: async (params: RecordsFilterParams) => {
+    const response = await api.get('/records', { params })
+    return response.payload
+  },
+
+  /**
+   * 获取广告记录详情
+   */
+  getRecordDetail: async (recordId: number): Promise<AdTrackingRecordDetail> => {
+    const response = await api.get(`/records/${recordId}`)
+    return response.payload.data
+  },
+
+  /**
+   * 删除广告记录
+   */
+  deleteRecord: async (recordId: number) => {
+    await api.delete(`/records/${recordId}`)
+  },
+
+  /**
+   * 批量删除广告记录
+   */
+  batchDeleteRecords: async (recordIds: number[]) => {
+    const response = await api.post('/records/batch/delete', { record_ids: recordIds })
+    return response.payload.data
+  },
+
+  /**
+   * 搜索广告记录
+   */
+  searchRecords: async (keyword: string, searchType: string = 'all', limit: number = 50) => {
+    const response = await api.get('/records/search', {
+      params: { keyword, search_type: searchType, limit }
+    })
+    return response.payload
+  },
+
+  /**
+   * 导出广告记录
+   */
+  exportRecords: async (params: ExportRecordsParams = {}): Promise<Blob> => {
+    const response = await axios.get(`${API_BASE_URL}/records/export`, {
+      params,
+      responseType: 'blob'
+    })
+    return response.data
+  },
+
+  /**
+   * 更新广告记录
+   */
+  updateRecord: async (recordId: number, data: Partial<AdTrackingRecord>) => {
+    const response = await api.patch(`/records/${recordId}`, data)
+    return response.payload
+  }
 }
 
-export default adTrackingApi
+// 频道管理 API
+export const channelsApi = {
+  /**
+   * 获取频道列表
+   */
+  getChannels: async (params: ChannelsQueryParams = {}) => {
+    const response = await api.get('/channels', { params })
+    return response.payload
+  },
+
+  /**
+   * 获取频道详情
+   */
+  getChannelInfo: async (channelId: number): Promise<AdTrackingChannel> => {
+    const response = await api.get(`/channels/${channelId}`)
+    return response.payload.data
+  }
+}
+
+// 标签管理 API
+export const tagsApi = {
+  /**
+   * 获取标签列表
+   */
+  getTags: async (params: TagsQueryParams = {}) => {
+    const response = await api.get('/tags', { params })
+    return response.payload
+  },
+
+  /**
+   * 获取标签详情
+   */
+  getTagDetail: async (tagId: number) => {
+    const response = await api.get(`/tags/${tagId}`)
+    return response.payload.data
+  }
+}
+
+// 处理管理 API
+export const processingApi = {
+  /**
+   * 开始处理频道
+   */
+  startProcessing: async (params: StartProcessingParams) => {
+    const response = await api.post('/process', params)
+    return response.payload.data
+  },
+
+  /**
+   * 获取处理状态
+   */
+  getBatchInfo: async (batchId: string): Promise<AdTrackingBatch> => {
+    const response = await api.get(`/process/${batchId}`)
+    return response.payload.data
+  },
+
+  /**
+   * 取消处理任务
+   */
+  cancelBatch: async (batchId: string) => {
+    await api.post(`/process/${batchId}/cancel`)
+  },
+
+  /**
+   * 重试处理任务
+   */
+  retryBatch: async (batchId: string) => {
+    const response = await api.post(`/process/retry/${batchId}`)
+    return response.payload.data
+  },
+
+  /**
+   * 获取处理历史
+   */
+  getHistory: async (params: HistoryQueryParams = {}) => {
+    const response = await api.get('/process/history', { params })
+    return response.payload
+  }
+}
+
+// 统计分析 API
+export const statisticsApi = {
+  /**
+   * 获取统计信息
+   */
+  getStatistics: async (days: number = 30) => {
+    const response = await api.get('/statistics', {
+      params: { days }
+    })
+    return response.payload.data as StatisticsData
+  },
+
+  /**
+   * 获取频道消息数量
+   */
+  getChannelMessageCount: async (channelId: number, startDate?: string, endDate?: string) => {
+    const response = await api.get('/channels/count', {
+      params: { channel_id: channelId, start_date: startDate, end_date: endDate }
+    })
+    return response.payload.data
+  }
+}
+
+// 服务方法 API（模拟后端服务方法）
+export const serviceApi = {
+  /**
+   * 获取批次摘要
+   */
+  getBatchSummary: async (batchId: string): Promise<BatchSummary> => {
+    const response = await api.get(`/service/batch-summary/${batchId}`)
+    return response.payload.data
+  },
+
+  /**
+   * 检查频道处理状态
+   */
+  checkChannelProcessingStatus: async (channelId: number): Promise<ChannelProcessingStatus> => {
+    const response = await api.get('/service/processing-status', {
+      params: { channel_id: channelId }
+    })
+    return response.payload.data
+  },
+
+  /**
+   * 获取关联记录
+   */
+  getRelatedRecords: async (recordId: number, limit: number = 5) => {
+    const response = await api.get(`/service/related-records/${recordId}`, {
+      params: { limit }
+    })
+    return response.payload
+  },
+
+  /**
+   * 获取重复记录
+   */
+  getDuplicateRecords: async (channelId: number, days: number = 7) => {
+    const response = await api.get('/service/duplicate-records', {
+      params: { channel_id: channelId, days }
+    })
+    return response.payload
+  },
+
+  /**
+   * 批量更新记录状态
+   */
+  batchUpdateRecordsStatus: async (recordIds: number[], isProcessed: boolean) => {
+    const response = await api.post('/service/batch-update-status', {
+      record_ids: recordIds,
+      is_processed: isProcessed
+    })
+    return response.payload.data
+  }
+}
+
+// 导出默认 API 对象
+export default {
+  ...adTrackingApi,
+  ...channelsApi,
+  ...tagsApi,
+  ...processingApi,
+  ...statisticsApi,
+  ...serviceApi
+}

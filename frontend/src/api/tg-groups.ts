@@ -20,6 +20,7 @@ export interface TgGroup {
   members_increment: number
   records_count: number
   records_increment: number
+  is_nsfw: boolean
 }
 
 export interface TgGroupListParams {

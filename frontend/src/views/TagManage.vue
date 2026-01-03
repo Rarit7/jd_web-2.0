@@ -127,8 +127,8 @@
         </el-form-item>
         <el-form-item label="标签颜色" prop="color">
           <div class="color-picker">
-            <div 
-              v-for="colorOption in colorOptions" 
+            <div
+              v-for="colorOption in colorOptions"
               :key="colorOption"
               class="color-option"
               :class="{ active: addForm.color === colorOption }"
@@ -136,6 +136,14 @@
               @click="addForm.color = colorOption"
             ></div>
           </div>
+        </el-form-item>
+        <el-form-item label="NSFW标记" prop="is_nsfw">
+          <el-switch
+            v-model="addForm.is_nsfw"
+            active-text="是"
+            inactive-text="否"
+          />
+          <div class="form-tip">标记为NSFW的标签将对群组图片应用模糊效果</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -157,8 +165,8 @@
         </el-form-item>
         <el-form-item label="标签颜色" prop="color">
           <div class="color-picker">
-            <div 
-              v-for="colorOption in colorOptions" 
+            <div
+              v-for="colorOption in colorOptions"
               :key="colorOption"
               class="color-option"
               :class="{ active: editForm.color === colorOption }"
@@ -166,6 +174,14 @@
               @click="editForm.color = colorOption"
             ></div>
           </div>
+        </el-form-item>
+        <el-form-item label="NSFW标记" prop="is_nsfw">
+          <el-switch
+            v-model="editForm.is_nsfw"
+            active-text="是"
+            inactive-text="否"
+          />
+          <div class="form-tip">标记为NSFW的标签将对群组图片应用模糊效果</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -255,7 +271,8 @@ const colorOptions = [
 // 添加表单
 const addForm = reactive({
   name: '',
-  color: '#409EFF'
+  color: '#409EFF',
+  is_nsfw: false
 })
 
 const addRules = {
@@ -269,7 +286,8 @@ const addRules = {
 const editForm = reactive({
   id: 0,
   name: '',
-  color: '#409EFF'
+  color: '#409EFF',
+  is_nsfw: false
 })
 
 const editRules = {
@@ -353,13 +371,18 @@ const addTag = async () => {
   try {
     await addFormRef.value.validate()
     addLoading.value = true
-    
-    const response = await tagsApi.add({ name: addForm.name, color: addForm.color })
+
+    const response = await tagsApi.add({
+      name: addForm.name,
+      color: addForm.color,
+      is_nsfw: addForm.is_nsfw
+    })
     if (response.err_code === 0) {
       ElMessage.success('添加成功')
       showAddDialog.value = false
       addForm.name = ''
       addForm.color = '#409EFF'
+      addForm.is_nsfw = false
       fetchData()
     } else {
       ElMessage.error(response.err_msg || '添加失败')
@@ -377,23 +400,25 @@ const editTag = (row: Tag) => {
   editForm.id = row.id
   editForm.name = row.name
   editForm.color = row.color || '#409EFF'
+  editForm.is_nsfw = row.is_nsfw || false
   showEditDialog.value = true
 }
 
 // 更新标签
 const updateTag = async () => {
   if (!editFormRef.value) return
-  
+
   try {
     await editFormRef.value.validate()
     editLoading.value = true
-    
+
     const response = await tagsApi.edit({
       id: editForm.id,
       name: editForm.name,
-      color: editForm.color
+      color: editForm.color,
+      is_nsfw: editForm.is_nsfw
     })
-    
+
     if (response.err_code === 0) {
       ElMessage.success('更新成功')
       showEditDialog.value = false

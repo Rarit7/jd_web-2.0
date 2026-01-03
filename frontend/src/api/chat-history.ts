@@ -142,6 +142,44 @@ export interface UserRecentMessagesResponse {
   }
 }
 
+// 用户最后一条消息响应接口
+export interface UserLastMessageResponse {
+  err_code: number
+  err_msg: string
+  payload: {
+    message: {
+      id: number
+      message_id: number
+      message: string
+      postal_time: string
+      nickname: string
+    }
+    total_count: number
+  }
+}
+
+// 用户消息ID列表响应接口
+export interface UserMessageIdsResponse {
+  err_code: number
+  err_msg: string
+  payload: {
+    message_ids: number[]
+    total_count: number
+  }
+}
+
+// 用户消息位置响应接口
+export interface UserMessagePositionResponse {
+  err_code: number
+  err_msg: string
+  payload: {
+    position: number
+    total: number
+    prev_message_id: number | null
+    next_message_id: number | null
+  }
+}
+
 export const chatHistoryApi = {
   // 获取聊天记录列表
   getList: (params: ChatHistoryParams = {}) => {
@@ -245,5 +283,22 @@ export const chatHistoryApi = {
   // 获取用户最近消息和图片（用于用户档案页面）
   getUserRecentMessages: (userId: string) => {
     return request.get<UserRecentMessagesResponse>(`/tg/user/recent_messages/${userId}`)
+  },
+
+  // 获取用户在群组的最后一条消息
+  getUserLastMessage: (groupId: string, userId: string) => {
+    return request.get<UserLastMessageResponse>(`/tg/chat_room/history/user_last_message/${groupId}/${userId}`)
+  },
+
+  // 获取用户在群组的消息ID列表
+  getUserMessageIds: (groupId: string, userId: string, order: 'asc' | 'desc' = 'asc') => {
+    return request.get<UserMessageIdsResponse>(`/tg/chat_room/history/user_message_ids/${groupId}/${userId}`, {
+      params: { order }
+    })
+  },
+
+  // 获取消息在用户消息列表中的位置
+  getUserMessagePosition: (groupId: string, userId: string, messageId: number) => {
+    return request.get<UserMessagePositionResponse>(`/tg/chat_room/history/user_message_position/${groupId}/${userId}/${messageId}`)
   }
 }

@@ -6,6 +6,7 @@ class ResultTag(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(32), nullable=False, default='', comment='名称')
     color = db.Column(db.String(7), nullable=False, default='#409EFF', comment='标签颜色')
+    is_nsfw = db.Column(db.Boolean, nullable=False, default=False, comment='NSFW标记')
     status = db.Column(db.Integer, nullable=False, default=0, comment='0:有效,1:无效')
     created_at = db.Column(db.DateTime, default=db.func.now())
     updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())

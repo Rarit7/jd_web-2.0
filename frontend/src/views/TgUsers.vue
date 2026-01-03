@@ -290,7 +290,7 @@
 import { ref, reactive, onMounted, computed, nextTick, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
-import { Edit, Star, StarFilled, Search } from '@element-plus/icons-vue'
+import { Edit, Star, StarFilled, Search, Avatar } from '@element-plus/icons-vue'
 import { tgUsersApi, type TgUser } from '@/api/tg-users'
 import { tagsApi, type Tag } from '@/api/tags'
 import { useRouter } from 'vue-router'
@@ -838,21 +838,31 @@ const handleRowClick = (row: TgUser, column: any, event: Event) => {
 }
 
 // 处理从用户详情抽屉导航到群组
-const handleNavigateToGroup = (data: { groupId: string, userId: string }) => {
+const handleNavigateToGroup = (data: { groupId: string, userId: string, userGroupIds?: string[] }) => {
   console.log('=== Drawer Group Navigation Debug ===')
   console.log('Navigation data:', data)
-  
+
   // 关闭抽屉
   showUserDrawer.value = false
-  
-  // 跳转到聊天历史页面
+
+  // 构建路由参数
+  const query: any = {
+    group_id: data.groupId,
+    user_id: data.userId,
+    from_user_detail: 'true',
+    navigate_to_last: 'true'
+  }
+
+  // 如果有用户群组信息，将其编码为逗号分隔的字符串传递
+  if (data.userGroupIds && data.userGroupIds.length > 0) {
+    query.user_group_ids = data.userGroupIds.join(',')
+    console.log('[handleNavigateToGroup] 传递用户群组IDs:', query.user_group_ids)
+  }
+
+  // 跳转到聊天历史页面（使用新版高级导航参数）
   router.push({
     path: '/chat-history',
-    query: {
-      group_id: data.groupId,
-      user_id: data.userId,
-      search_type: 'user_id'
-    }
+    query
   })
 }
 

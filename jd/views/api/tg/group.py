@@ -111,7 +111,10 @@ def tg_group_list_json():
     else:
         groups = query.order_by(TgGroup.id.desc()).all()
     tag_list = TagService.list()
-    
+    tag_dict = {t['id']: t['name'] for t in tag_list}
+    # 构建NSFW标签ID集合（用于高效判断群组是否NSFW）
+    nsfw_tag_ids = {t['id'] for t in tag_list if t.get('is_nsfw', False)}
+
     if not groups:
         return jsonify({
             'err_code': 0,
@@ -133,7 +136,6 @@ def tg_group_list_json():
     parse_tag_result = collections.defaultdict(list)
     for p in parse_tag_list:
         parse_tag_result[p.group_id].append(str(p.tag_id))
-    tag_dict = {t['id']: t['name'] for t in tag_list}
     chat_postal_time = TgGroupChatHistory.query.with_entities(TgGroupChatHistory.chat_id,
                                                               func.max(TgGroupChatHistory.postal_time).label(
                                                                   'latest_postal_time')).group_by(
@@ -150,6 +152,11 @@ def tg_group_list_json():
     for group in groups:
         parse_tag = parse_tag_result.get(group.id, [])
         tag_text = ','.join([tag_dict.get(int(t), '') for t in parse_tag if tag_dict.get(int(t), '')])
+
+        # 计算群组是否为NSFW（任意标签为NSFW即为NSFW群组）
+        group_tag_ids = {int(t) for t in parse_tag if t}
+        is_nsfw = bool(group_tag_ids & nsfw_tag_ids)
+
         latest_postal_time = chat_postal_time_dict.get(group.chat_id, '')
 
         # Get status data for this group
@@ -180,6 +187,7 @@ def tg_group_list_json():
             'members_increment': members_increment,
             'records_count': records_count,
             'records_increment': records_increment,
+            'is_nsfw': is_nsfw,
         }
         if not latest_postal_time:
             no_chat_history_group.append(d)

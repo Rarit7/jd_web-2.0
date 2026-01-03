@@ -25,7 +25,7 @@ interface Props {
 
 defineProps<Props>()
 
-const title = 'JD Web'
+const title = '云端猎毒'
 const logo = '' // 可以设置logo图片地址
 </script>
 

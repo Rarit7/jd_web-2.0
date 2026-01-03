@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS `ad_tracking_records` (
     INDEX `idx_trigger_keyword` (`trigger_keyword`),
     INDEX `idx_process_batch_id` (`process_batch_id`),
     INDEX `idx_trigger_tag_id` (`trigger_tag_id`),
-    FOREIGN KEY (`trigger_tag_id`) REFERENCES `tag_keyword_mapping`(`tag_id`) ON DELETE SET NULL
+    FOREIGN KEY (`trigger_tag_id`) REFERENCES `result_tag`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告追踪记录表';
 
 -- 广告追踪处理批次表
@@ -76,8 +76,7 @@ FOREIGN KEY (`process_batch_id`) REFERENCES `ad_tracking_processing_batches`(`id
 -- 复合索引：用于按频道和时间范围查询广告记录
 CREATE INDEX `idx_channel_sendtime` ON `ad_tracking_records` (`channel_id`, `send_time`);
 
--- 复合索引：用于按处理批次和状态查询
-CREATE INDEX `idx_batch_status` ON `ad_tracking_processing_batches` (`id`, `status`);
+-- 复合索引：用于按处理批次和状态查询（注：id 是 PRIMARY KEY，已有索引，无需创建复合索引）
 
 -- 全文索引：用于消息文本搜索（MySQL 5.6+）
 CREATE FULLTEXT INDEX `idx_message_text` ON `ad_tracking_records` (`message_text`);

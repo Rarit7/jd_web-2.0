@@ -154,7 +154,7 @@ const routes = computed(() => {
           meta: {
             title: '标签管理',
             icon: 'Collection',
-            roles: [1]
+            roles: [0, 1]
           }
         },
         {
@@ -163,7 +163,7 @@ const routes = computed(() => {
           meta: {
             title: '自动标签',
             icon: 'PriceTag',
-            roles: [1]
+            roles: [0, 1]
           }
         },
         {
@@ -190,7 +190,7 @@ const routes = computed(() => {
       meta: {
         title: '后台管理',
         icon: 'Setting',
-        roles: [1]
+        roles: [0, 1]
       },
       children: [
         {
@@ -199,7 +199,7 @@ const routes = computed(() => {
           meta: {
             title: '用户管理',
             icon: 'User',
-            roles: [1]
+            roles: [0, 1]
           }
         },
         {
@@ -208,7 +208,7 @@ const routes = computed(() => {
           meta: {
             title: '抓取进度',
             icon: 'Loading',
-            roles: [1]
+            roles: [0, 1]
           }
         },
         {
@@ -217,7 +217,7 @@ const routes = computed(() => {
           meta: {
             title: '黑词管理',
             icon: 'Warning',
-            roles: [1]
+            roles: [0, 1]
           }
         },
         {
@@ -226,7 +226,7 @@ const routes = computed(() => {
           meta: {
             title: '网站设置',
             icon: 'Tools',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]

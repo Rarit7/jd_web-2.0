@@ -223,10 +223,10 @@ const router = createRouter({
           path: '',
           name: 'UserManage',
           component: () => import('@/views/UserManage.vue'),
-          meta: { 
+          meta: {
             title: '用户管理',
             icon: 'User',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]
@@ -242,7 +242,7 @@ const router = createRouter({
           meta: {
             title: '标签管理',
             icon: 'Collection',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]
@@ -258,7 +258,7 @@ const router = createRouter({
           meta: {
             title: '自动标签',
             icon: 'PriceTag',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]
@@ -271,10 +271,10 @@ const router = createRouter({
           path: '',
           name: 'SearchQueue',
           component: () => import('@/views/SearchQueue.vue'),
-          meta: { 
+          meta: {
             title: '抓取进度',
             icon: 'Loading',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]
@@ -287,10 +287,10 @@ const router = createRouter({
           path: '',
           name: 'BlackWords',
           component: () => import('@/views/BlackWords.vue'),
-          meta: { 
+          meta: {
             title: '黑词管理',
             icon: 'Warning',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]
@@ -303,10 +303,10 @@ const router = createRouter({
           path: '',
           name: 'WebsiteSettings',
           component: () => import('@/views/WebsiteSettings.vue'),
-          meta: { 
+          meta: {
             title: '网站设置',
             icon: 'Tools',
-            roles: [1]
+            roles: [0, 1]
           }
         }
       ]

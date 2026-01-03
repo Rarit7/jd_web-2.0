@@ -145,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { RefreshRight, Close } from '@element-plus/icons-vue'
 import adTrackingApi from '@/api/adTracking'

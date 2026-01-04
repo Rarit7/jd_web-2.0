@@ -1,6 +1,6 @@
 <template>
-  <div class="ad-tracker-page">
-    <el-tabs v-model="activeTab" class="ad-tracker-tabs">
+  <div class="tracker-page">
+    <el-tabs v-model="activeTab" class="tracker-tabs">
       <!-- 展示标签页 -->
       <el-tab-pane label="广告追踪" name="display">
         <DisplayTab />
@@ -34,12 +34,12 @@ watch(activeTab, (newTab) => {
 </script>
 
 <style scoped lang="scss">
-.ad-tracker-page {
+.tracker-page {
   padding: 20px;
   background-color: #f5f7fa;
   min-height: calc(100vh - 60px);
 
-  .ad-tracker-tabs {
+  .tracker-tabs {
     :deep(.el-tabs__header) {
       margin-bottom: 20px;
     }

@@ -216,7 +216,7 @@ const searchChannels = async (keyword: string) => {
     // 只保留频道类型（group_type === 2），排除群组（group_type === 1）
     searchedChannels.value = (response.data || []).filter(channel => channel.group_type === 2)
   } catch (error) {
-    console.error('搜索频道失败:', error)
+    // 搜索失败，清空结果
   } finally {
     loadingChannels.value = false
   }
@@ -227,7 +227,6 @@ const handleChannelChange = (channelId: number) => {
   const channel = channels.value.find(c => c.id === channelId)
   if (channel) {
     // 可以在这里加载频道的更多信息
-    console.log('选择频道:', channel)
   }
 }
 
@@ -251,7 +250,6 @@ const startProcessing = async () => {
     // 重置表单
     resetProcessForm()
   } catch (error) {
-    console.error('开始处理失败:', error)
     ElMessage.error('开始处理失败')
   } finally {
     processing.value = false
@@ -290,7 +288,6 @@ const retryBatch = async (batchId: string) => {
     ElMessage.success('批次已重新开始')
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('重试失败:', error)
       ElMessage.error('重试失败')
     }
   }
@@ -313,7 +310,6 @@ const cancelBatch = async (batchId: string) => {
     ElMessage.success('批次已取消')
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('取消失败:', error)
       ElMessage.error('取消失败')
     }
   }

@@ -125,20 +125,7 @@
     </div>
 
     <!-- 广告卡片网格 -->
-    <div v-else class="ad-grid">
-      <!-- 统计摘要栏 -->
-      <div class="stats-bar">
-        <el-space :size="16" alignment="center" wrap>
-          <el-statistic title="当前页" :value="records.length" suffix="条" />
-          <el-divider direction="vertical" />
-          <el-statistic title="总记录" :value="total" suffix="条" />
-          <el-divider direction="vertical" />
-          <el-text type="info" size="small">
-            显示 {{ startIndex }} - {{ endIndex }} 条，共 {{ totalPages }} 页
-          </el-text>
-        </el-space>
-      </div>
-
+    <div v-else class="tracker-grid">
       <!-- 卡片网格（带过渡动画） -->
       <transition-group name="card-list" tag="div" class="cards-container">
         <el-row :gutter="16" key="cards-row">
@@ -149,7 +136,7 @@
             :lg="4.8"
             v-for="record in records"
             :key="record.id"
-            class="ad-card-col"
+            class="tracker-item-col"
           >
             <AdCard
               :record="record"
@@ -458,20 +445,12 @@ onMounted(() => {
     }
   }
 
-  .ad-grid {
-    .stats-bar {
-      padding: 16px 20px;
-      background: white;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
-    }
-
+  .tracker-grid {
     .cards-container {
       min-height: 400px;
     }
 
-    .ad-card-col {
+    .tracker-item-col {
       margin-bottom: 16px;
 
       // 卡片列表过渡
@@ -518,11 +497,6 @@ onMounted(() => {
       margin-bottom: 16px;
     }
 
-    .ad-grid .stats-bar {
-      :deep(.el-space) {
-        justify-content: center;
-      }
-    }
   }
 }
 </style>

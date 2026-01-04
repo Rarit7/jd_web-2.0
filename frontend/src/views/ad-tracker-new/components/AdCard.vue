@@ -1,15 +1,15 @@
 <template>
   <el-card
     shadow="hover"
-    class="ad-card"
+    class="tracker-item-card"
     :class="{ 'processed': record.is_processed }"
     @click="$emit('click', record)"
   >
     <!-- 卡片内容容器：左图片右文字 -->
     <div class="card-content">
       <!-- 左侧：广告图片（方形） -->
-      <div class="ad-image-container" @click.stop>
-        <div class="ad-image">
+      <div class="tracker-image-container" @click.stop>
+        <div class="tracker-item-image">
           <img
             v-if="record.image_url"
             :src="record.image_url"
@@ -176,7 +176,7 @@ const getTagsTooltip = computed(() => {
 </script>
 
 <style scoped lang="scss">
-.ad-card {
+.tracker-item-card {
   cursor: pointer;
   transition: all 0.3s;
   position: relative;
@@ -204,7 +204,7 @@ const getTagsTooltip = computed(() => {
   }
 
   // 左侧：图片容器（方形）
-  .ad-image-container {
+  .tracker-image-container {
     flex-shrink: 0;
     width: 120px;
     height: 120px;
@@ -213,7 +213,7 @@ const getTagsTooltip = computed(() => {
     background-color: #f5f7fa;
   }
 
-  .ad-image {
+  .tracker-item-image {
     width: 100%;
     height: 100%;
     overflow: hidden;
@@ -402,7 +402,7 @@ const getTagsTooltip = computed(() => {
 
 // 响应式设计
 @media (max-width: 1200px) {
-  .ad-card {
+  .tracker-item-card {
     :deep(.el-card__body) {
       padding: 6px;
     }
@@ -411,7 +411,7 @@ const getTagsTooltip = computed(() => {
       gap: 8px;
     }
 
-    .ad-image-container {
+    .tracker-image-container {
       width: 100px;
       height: 100px;
     }
@@ -429,8 +429,8 @@ const getTagsTooltip = computed(() => {
 }
 
 @media (max-width: 768px) {
-  .ad-card {
-    .ad-image-container {
+  .tracker-item-card {
+    .tracker-image-container {
       width: 80px;
       height: 80px;
     }

@@ -220,7 +220,7 @@ const loadTags = async () => {
     const response = await adTrackingApi.getTags()
     tags.value = response.data || []
   } catch (error) {
-    console.error('加载标签失败:', error)
+    // 标签加载失败，使用空数组
   }
 }
 
@@ -307,7 +307,6 @@ const handleRetry = async () => {
     handleClose()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('重试失败:', error)
       ElMessage.error('重试失败')
     }
     loading.value = false
@@ -338,7 +337,6 @@ const handleCancel = async () => {
     handleClose()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('取消失败:', error)
       ElMessage.error('取消失败')
     }
     loading.value = false

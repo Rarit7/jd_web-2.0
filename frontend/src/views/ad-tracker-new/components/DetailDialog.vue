@@ -208,7 +208,6 @@ const downloadImage = async () => {
 
     ElMessage.success('图片下载成功')
   } catch (error) {
-    console.error('下载失败:', error)
     ElMessage.error('图片下载失败')
   }
 }
@@ -228,7 +227,6 @@ const handleMarkAsProcessed = async () => {
     emit('processed', props.record.id)
     handleClose()
   } catch (error) {
-    console.error('操作失败:', error)
     ElMessage.error('操作失败')
   }
 }
@@ -253,7 +251,6 @@ const handleBatchProcess = async () => {
     handleClose()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('批量处理失败:', error)
       ElMessage.error('批量处理失败')
     }
   }
@@ -279,7 +276,6 @@ const handleDelete = async () => {
     handleClose()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('删除失败:', error)
       ElMessage.error('删除失败')
     }
   }

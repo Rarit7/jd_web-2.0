@@ -126,6 +126,7 @@ import {
   Operation
 } from '@element-plus/icons-vue'
 import adTrackingApi from '@/api/adTracking'
+import { formatDateTime } from '@/utils/adTracking'
 import type { AdTrackingRecord, AdTrackingBatch, RelatedRecord } from '@/types/adTracking'
 
 const props = defineProps<{
@@ -146,12 +147,6 @@ const dialogVisible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 })
-
-// 格式化日期时间
-const formatDateTime = (dateString: string | null) => {
-  if (!dateString) return '-'
-  return new Date(dateString).toLocaleString('zh-CN')
-}
 
 // 计算属性：获取高亮后的消息文本
 const highlightedMessageText = computed(() => {

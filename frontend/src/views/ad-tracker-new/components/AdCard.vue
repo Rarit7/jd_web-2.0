@@ -123,9 +123,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { Picture, Check, Delete } from '@element-plus/icons-vue'
 import type { AdTrackingRecord } from '@/types/adTracking'
+import { formatDateTime, truncateText } from '@/utils/adTracking'
 
 const props = defineProps<{
   record: AdTrackingRecord
@@ -136,25 +137,6 @@ defineEmits<{
   process: [record: AdTrackingRecord]
   delete: [record: AdTrackingRecord]
 }>()
-
-// 监听record数据变化
-watch(
-  () => props.record,
-  (newRecord) => {
-    console.log('[AdCard] Record received:', {
-      id: newRecord.id,
-      hasImageUrl: !!newRecord.image_url,
-      imageUrl: newRecord.image_url,
-      messageText: newRecord.message_text?.substring(0, 50),
-      hasTagInfo: !!newRecord.tag_info,
-      tagInfoLength: newRecord.tag_info?.length || 0,
-      tagInfo: newRecord.tag_info,
-      isProcessed: newRecord.is_processed,
-      allKeys: Object.keys(newRecord)
-    })
-  },
-  { immediate: true }
-)
 
 // 处理主图片加载错误
 const handleImageError = (event: Event) => {
@@ -182,24 +164,6 @@ const handleDefaultImageError = (event: Event) => {
   }
 }
 
-// 截断文本
-const truncateText = (text: string | null, maxLength = 60) => {
-  if (!text) return ''
-  return text.length > maxLength ? text.substring(0, maxLength) + '...' : text
-}
-
-// 格式化日期时间
-const formatDateTime = (dateString: string | null) => {
-  if (!dateString) return '未知时间'
-  const date = new Date(dateString)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
 
 // 计算属性：获取标签的 Tooltip 内容
 const getTagsTooltip = computed(() => {

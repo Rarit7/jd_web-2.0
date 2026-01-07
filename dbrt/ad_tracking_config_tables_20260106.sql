@@ -2,6 +2,7 @@
 -- 广告追踪系统 - 配置管理表
 -- 创建日期：2026-01-06
 -- 说明：包含交易方式配置、地理位置主数据等可管理配置表
+-- 注意：不使用外键约束，只使用索引
 -- ================================================
 
 
@@ -43,8 +44,7 @@ CREATE TABLE IF NOT EXISTS `ad_tracking_transaction_method_keyword` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_method_keyword` (`method_id`, `keyword`),
     KEY `idx_method_id` (`method_id`),
-    KEY `idx_is_active` (`is_active`),
-    CONSTRAINT `fk_keyword_method` FOREIGN KEY (`method_id`) REFERENCES `ad_tracking_transaction_method_config` (`id`) ON DELETE CASCADE
+    KEY `idx_is_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告追踪-交易方式关键词配置';
 
 
@@ -133,90 +133,7 @@ WHERE g1.`level` = 3 AND g1.`is_active` = TRUE;
 
 
 -- ================================================
--- 初始化默认数据（可选）
--- ================================================
-
--- 交易方式默认配置
-INSERT INTO `ad_tracking_transaction_method_config` (`method_name`, `display_name`, `description`, `priority`)
-VALUES
-    ('埋包', '埋包', '地下埋藏交易方式', 10),
-    ('面交', '面交（当面交易）', '当面交易方式', 20),
-    ('邮寄', '邮寄（快递）', '快递邮寄方式', 30),
-    ('自取', '自取', '自行取货方式', 40),
-    ('物流', '物流', '物流配送方式', 50),
-    ('快递', '快递', '快递配送方式', 60)
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
--- 为各交易方式添加关键词
--- 埋包相关关键词
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '埋包', 3 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '埋包'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '埋', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '埋包'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '地埋', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '埋包'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
--- 面交相关关键词
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '面交', 3 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '面交'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '面', 1 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '面交'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '当面', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '面交'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
--- 邮寄相关关键词
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '邮寄', 3 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '邮寄'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '寄', 1 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '邮寄'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
--- 自取相关关键词
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '自取', 3 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '自取'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '自', 1 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '自取'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
--- 物流相关关键词
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '物流', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '物流'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
--- 快递相关关键词
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '快递', 3 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '快递'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '顺丰', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '快递'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '中通', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '快递'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `ad_tracking_transaction_method_keyword` (`method_id`, `keyword`, `weight`)
-SELECT `id`, '圆通', 2 FROM `ad_tracking_transaction_method_config` WHERE `method_name` = '快递'
-ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP;
-
-
--- ================================================
 -- 表创建完成
 -- ================================================
 -- 配置管理表及视图已成功创建
--- 支持实时更新交易方式和地理位置，无需重启应用
+-- 注意：初始数据需要通过单独的数据导入脚本执行

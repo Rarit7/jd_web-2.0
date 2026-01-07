@@ -2,6 +2,7 @@
 -- 广告追踪系统 - 新增数据表
 -- 创建日期：2025-01-05
 -- 说明：包含地理位置、价格、交易方式和批次处理四个核心表
+-- 注意：不使用外键约束，只使用索引
 -- ================================================
 
 
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS `ad_tracking_geo_location` (
     KEY `idx_city` (`city`),
     KEY `idx_msg_date` (`msg_date`),
     KEY `idx_chat_id` (`chat_id`),
-    CONSTRAINT `fk_geo_chat` FOREIGN KEY (`chat_id`) REFERENCES `tg_group` (`chat_id`) ON DELETE CASCADE
+    KEY `idx_message_id` (`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告追踪-地理位置记录';
 
 
@@ -53,7 +54,7 @@ CREATE TABLE IF NOT EXISTS `ad_tracking_price` (
     KEY `idx_chat_id` (`chat_id`),
     KEY `idx_msg_date` (`msg_date`),
     KEY `idx_unit` (`unit`),
-    CONSTRAINT `fk_price_chat` FOREIGN KEY (`chat_id`) REFERENCES `tg_group` (`chat_id`) ON DELETE CASCADE
+    KEY `idx_message_id` (`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告追踪-价格记录';
 
 
@@ -77,8 +78,7 @@ CREATE TABLE IF NOT EXISTS `ad_tracking_transaction_method` (
     KEY `idx_msg_date` (`msg_date`),
     KEY `idx_chat_id` (`chat_id`),
     KEY `idx_tag_id` (`tag_id`),
-    CONSTRAINT `fk_method_chat` FOREIGN KEY (`chat_id`) REFERENCES `tg_group` (`chat_id`) ON DELETE CASCADE,
-    CONSTRAINT `fk_method_tag` FOREIGN KEY (`tag_id`) REFERENCES `result_tag` (`id`) ON DELETE SET NULL
+    KEY `idx_message_id` (`message_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告追踪-交易方式记录';
 
 
@@ -109,8 +109,7 @@ CREATE TABLE IF NOT EXISTS `ad_tracking_batch_process_log` (
     UNIQUE KEY `uk_batch_id` (`batch_id`),
     KEY `idx_chat_id` (`chat_id`),
     KEY `idx_status` (`status`),
-    KEY `idx_created_at` (`created_at`),
-    CONSTRAINT `fk_batch_chat` FOREIGN KEY (`chat_id`) REFERENCES `tg_group` (`chat_id`) ON DELETE CASCADE
+    KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='广告追踪-批次处理日志';
 
 

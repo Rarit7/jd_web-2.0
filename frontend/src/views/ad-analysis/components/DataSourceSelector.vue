@@ -97,6 +97,15 @@
               <el-icon><VideoPlay /></el-icon>
               {{ submitting ? '数据处理中...' : '开始数据处理' }}
             </el-button>
+            <el-button
+              type="danger"
+              @click="handleClearCache"
+              :loading="clearingCache"
+              plain
+            >
+              <el-icon><Delete /></el-icon>
+              {{ clearingCache ? '清空中...' : '清空缓存' }}
+            </el-button>
             <el-button @click="resetForm">
               重置
             </el-button>
@@ -128,8 +137,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Download, VideoPlay } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Download, VideoPlay, Delete } from '@element-plus/icons-vue'
 import adTrackingApi from '@/api/adTracking'
 import { apiClearAnalysisCache } from '@/api/adAnalysis'
 import { useAdAnalysisStore } from '@/store/modules/adAnalysis'
@@ -139,6 +148,7 @@ import type { AdTrackingChannel } from '@/types/adTracking'
 // ==================== 响应式状态 ====================
 const loadingChannels = ref(false)
 const submitting = ref(false)
+const clearingCache = ref(false)
 const channels = ref<AdTrackingChannel[]>([])
 const searchedChannels = ref<AdTrackingChannel[]>([])
 const channelSearchKeyword = ref('')
@@ -293,6 +303,36 @@ const resetForm = () => {
     days: 365
   }
   selectorFormRef.value?.clearValidate()
+}
+
+/**
+ * 手动清空Redis缓存
+ */
+const handleClearCache = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要清空Redis缓存吗？清空后系统将重新计算统计数据，首次加载可能会稍慢。',
+      '清空缓存确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    clearingCache.value = true
+    const response = await apiClearAnalysisCache(selectorForm.value.chat_id || undefined)
+    const clearedCount = response.payload?.cleared_count || 0
+
+    ElMessage.success(`缓存已清空，共清除 ${clearedCount} 条缓存记录`)
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('清空缓存失败:', error)
+      ElMessage.error(error?.message || '清空缓存失败，请重试')
+    }
+  } finally {
+    clearingCache.value = false
+  }
 }
 
 /**

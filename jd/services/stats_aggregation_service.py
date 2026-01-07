@@ -91,14 +91,15 @@ class StatsAggregationService:
 
     @staticmethod
     def _build_dark_keywords_pie(chat_id: Optional[int], tag_ids: Optional[List[int]], start_date: datetime) -> List[Dict]:
-        """构建圆环图数据（按具体关键字统计）"""
+        """构建圆环图数据（按毒品名称统计）"""
         logger.debug("构建黑词圆环图数据")
 
         query = db.session.query(
-            AdTrackingDarkKeyword.keyword,
+            AdTrackingDarkKeyword.drug_id,
             func.sum(AdTrackingDarkKeyword.count).label('total_count')
         ).filter(
-            AdTrackingDarkKeyword.msg_date >= start_date
+            AdTrackingDarkKeyword.msg_date >= start_date,
+            AdTrackingDarkKeyword.drug_id.isnot(None)
         )
 
         # 如果指定了chat_id，添加过滤条件
@@ -110,16 +111,23 @@ class StatsAggregationService:
             # 这里假设标签与黑词记录有关联，如果需要可以添加
             pass
 
-        results = query.group_by(AdTrackingDarkKeyword.keyword).all()
+        results = query.group_by(AdTrackingDarkKeyword.drug_id).all()
 
-        # 构建圆环图数据（使用具体关键字作为名称）
+        # 获取毒品名称映射
+        drug_names = {}
+        for drug_id, _ in results:
+            drug = AdTrackingDarkKeywordDrug.query.get(drug_id)
+            if drug:
+                drug_names[drug_id] = drug.display_name or drug.name
+
+        # 构建圆环图数据（使用毒品名称作为名称）
         pie_data = []
-        for keyword, total_count in results:
-            if keyword:
-                pie_data.append({
-                    'name': keyword,
-                    'value': int(total_count)
-                })
+        for drug_id, total_count in results:
+            drug_name = drug_names.get(drug_id, f'未知({drug_id})')
+            pie_data.append({
+                'name': drug_name,
+                'value': int(total_count)
+            })
 
         # 按数量降序排序
         pie_data.sort(key=lambda x: x['value'], reverse=True)

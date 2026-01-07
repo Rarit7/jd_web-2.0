@@ -198,6 +198,22 @@ const router = createRouter({
         }
       ]
     },
+    // 数据分析
+    {
+      path: '/ad-analysis',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'AdAnalysis',
+          component: () => import('@/views/ad-analysis/index.vue'),
+          meta: {
+            title: '态势分析',
+            icon: 'DataAnalysis'
+          }
+        }
+      ]
+    },
     // 数据大屏
     {
       path: '/dashboard-screen',

@@ -75,3 +75,6 @@ from . import job_queue
 from . import ad_tracking
 from . import user_profile
 from . import department
+from . import ads_analysis
+from . import config_management
+from . import ad_analysis_batch

@@ -148,16 +148,20 @@ class AhoCorasickMatcher:
             text: 待搜索的文本
 
         Returns:
-            去重后的匹配结果列表
+            去重后的匹配结果列表（不含位置信息）
         """
         all_matches = self.search(text)
 
-        # 使用字典去重（保留第一次匹配）
+        # ✅ 优化：在去重时移除位置信息，减少数据大小
         unique_matches = {}
         for match in all_matches:
             keyword = match['keyword']
             if keyword not in unique_matches:
-                unique_matches[keyword] = match
+                unique_matches[keyword] = {
+                    'keyword': match['keyword'],
+                    'metadata': match['metadata']
+                    # 移除位置信息，减少返回数据大小
+                }
 
         return list(unique_matches.values())
 
@@ -185,7 +189,7 @@ class KeywordMatcherCache:
         self.cache_ttl = cache_ttl
         self._matcher = None
         self._cache_timestamp = None
-        self._keyword_mappings = None
+        self._keyword_count = 0  # ✅ 优化：改为追踪关键词数量而不是对象列表
 
     def build_matcher(self, keyword_mappings: List[Any]) -> AhoCorasickMatcher:
         """
@@ -200,11 +204,12 @@ class KeywordMatcherCache:
         import datetime
 
         current_time = datetime.datetime.now()
+        current_count = len(keyword_mappings)
 
-        # 检查缓存是否有效
+        # ✅ 优化：仅检查关键词数量和时间戳（避免深度对象比较）
         if (self._matcher and self._cache_timestamp and
             (current_time - self._cache_timestamp).total_seconds() < self.cache_ttl and
-            self._keyword_mappings == keyword_mappings):
+            self._keyword_count == current_count):
             logger.debug("Using cached AC matcher")
             return self._matcher
 
@@ -224,10 +229,10 @@ class KeywordMatcherCache:
         # 构建失败指针
         matcher.build()
 
-        # 更新缓存
+        # ✅ 优化：仅保存关键词数量而不是整个对象列表
         self._matcher = matcher
         self._cache_timestamp = current_time
-        self._keyword_mappings = keyword_mappings
+        self._keyword_count = current_count
 
         stats = matcher.get_stats()
         logger.info(f"AC matcher built: {stats['keyword_count']} keywords, "
@@ -255,7 +260,7 @@ class KeywordMatcherCache:
         # 执行匹配（去重）
         matches = matcher.search_unique(text)
 
-        # 转换为标准格式
+        # ✅ 优化：转换为标准格式，移除位置信息
         results = []
         for match in matches:
             metadata = match['metadata']
@@ -263,8 +268,8 @@ class KeywordMatcherCache:
                 'tag_id': metadata['tag_id'],
                 'keyword': match['keyword'],
                 'auto_focus': metadata['auto_focus'],
-                'mapping_id': metadata['mapping_id'],
-                'position': match['position']
+                'mapping_id': metadata['mapping_id']
+                # 移除位置信息 - 在 auto_tagging 中未使用
             })
 
         return results

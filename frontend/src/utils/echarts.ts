@@ -10,6 +10,7 @@ import {
   PieChart,
   FunnelChart,
   ScatterChart,
+  MapChart,
 } from 'echarts/charts'
 
 // 导入组件
@@ -20,6 +21,7 @@ import {
   LegendComponent,
   GeoComponent,
   ToolboxComponent,
+  VisualMapComponent,
 } from 'echarts/components'
 
 // 导入渲染器
@@ -33,6 +35,7 @@ echarts.use([
   PieChart,
   FunnelChart,
   ScatterChart,
+  MapChart,
 
   // 组件
   TitleComponent,
@@ -41,6 +44,7 @@ echarts.use([
   LegendComponent,
   GeoComponent,
   ToolboxComponent,
+  VisualMapComponent,
 
   // 渲染器
   CanvasRenderer,

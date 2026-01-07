@@ -149,6 +149,14 @@ const routes = computed(() => {
           }
         },
         {
+          path: '/ad-analysis',
+          name: 'AdAnalysis',
+          meta: {
+            title: '态势分析',
+            icon: 'DataAnalysis'
+          }
+        },
+        {
           path: '/tag-manage',
           name: 'TagManage',
           meta: {

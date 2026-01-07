@@ -92,6 +92,8 @@ import 'echarts-wordcloud'
 import { useAppStore } from '@/store/modules/app'
 import { toUTC8 } from '@/utils/date'
 import { geoCoordMap, cityPinyinMap, convertData, getCityCenter } from './dashboard-screen/utils'
+import { fetchDashboardData } from '@/api/dashboardApi'
+import type { TransactionMethodData, PriceTrendResponse } from '@/types/adAnalysis'
 
 const appStore = useAppStore()
 
@@ -104,6 +106,23 @@ const layoutClasses = computed(() => ({
 const pageLoading = ref(true)
 const currentTime = ref('')
 const title = ref('TG_涉毒数据可视化大屏')
+
+// 数据加载状态
+const dataLoading = ref(true)
+const dataError = ref<string | null>(null)
+
+// 真实数据存储
+const transactionMethodsData = ref<TransactionMethodData[]>([])
+const darkKeywordsData = ref<{name: string; value: number}[]>([])
+const priceTrendData = ref<PriceTrendResponse | null>(null)
+const geoHeatmapData = ref<{name: string; value: number}[]>([])
+const geoCitiesData = ref<{name: string; value: number; province: string}[]>([])
+
+// 筛选参数
+const filters = ref({
+  chat_id: undefined as number | undefined,
+  days: 365
+})
 
 // 图表引用
 const echart2 = ref()
@@ -132,7 +151,7 @@ const counter2Data = ref({
 
 
 const echart2Data = ref({
-  title: '地区分布',
+  title: '交易方式',
   categories: ['济南', '青岛', '烟台', '潍坊', '临沂', '淄博', '威海'],
   series: [
     { name: '敏感词', data: [89, 95, 123, 108, 134, 87, 98] },
@@ -165,7 +184,7 @@ const wordCloudData = ref({
 
 
 const echart4Data = ref({
-  title: '月度趋势分析',
+  title: '价格趋势',
   data: [
     { name: '产量', value: [3, 4, 3, 4, 3, 4, 3, 6, 2, 4, 2, 4, 3, 4, 3, 4, 3, 4, 3, 6, 2, 4, 4] },
     { name: '销量', value: [5, 3, 5, 6, 1, 5, 3, 5, 6, 4, 6, 4, 8, 3, 5, 6, 1, 5, 3, 7, 2, 5, 8] }
@@ -188,7 +207,7 @@ const echart5Data = ref({
 })
 
 const echart6Data = ref({
-  title: '重点城市占比',
+  title: '省级行政区占比',
   data: [
     { name: '济南', value: 235 },
     { name: '青岛', value: 198 },
@@ -218,6 +237,7 @@ let chart4: any = null
 let chart5: any = null
 let chart6: any = null
 let mapChart: any = null
+let wordCloudChart: any = null
 
 // 时间更新函数
 const updateTime = () => {
@@ -233,6 +253,720 @@ const updateTime = () => {
 }
 
 let timeTimer: NodeJS.Timeout | null = null
+
+// ============================================================================
+// 数据获取函数
+// ============================================================================
+
+/**
+ * 获取 Dashboard 所有数据
+ */
+const loadDashboardData = async () => {
+  dataLoading.value = true
+  dataError.value = null
+
+  try {
+    console.log('[DashboardScreen] 开始加载数据...')
+
+    const data = await fetchDashboardData({
+      chat_id: filters.value.chat_id,
+      days: filters.value.days
+    })
+
+    // 检查是否有错误
+    const hasErrors = Object.values(data.errors).some(err => err !== null)
+    if (hasErrors) {
+      console.warn('[DashboardScreen] 部分数据加载失败:', data.errors)
+    }
+
+    // 更新交易方式数据
+    if (data.transactionMethods && data.transactionMethods.length > 0) {
+      transactionMethodsData.value = data.transactionMethods
+      console.log('[DashboardScreen] 交易方式数据:', transactionMethodsData.value.length, '条')
+      updateTransactionChart()
+    } else {
+      console.warn('[DashboardScreen] 交易方式数据为空')
+    }
+
+    // 更新黑词数据（关键词词云格式）
+    if (data.darkKeywords && data.darkKeywords.length > 0) {
+      darkKeywordsData.value = data.darkKeywords
+      console.log('[DashboardScreen] 黑词关键词数据:', darkKeywordsData.value.length, '个')
+      updateWordCloud()
+    } else {
+      console.warn('[DashboardScreen] 黑词关键词数据为空')
+    }
+
+    // 更新价格趋势数据
+    if (data.priceTrend && data.priceTrend.data) {
+      priceTrendData.value = data.priceTrend
+      console.log('[DashboardScreen] 价格趋势数据已加载')
+      updatePriceChart()
+    } else {
+      console.warn('[DashboardScreen] 价格趋势数据为空')
+    }
+
+    // 更新地理热力数据（更新柱状图、饼图和地图）
+    if (data.geoHeatmap) {
+      geoHeatmapData.value = data.geoHeatmap.provinces || []
+      geoCitiesData.value = data.geoHeatmap.all_cities || []
+      console.log('[DashboardScreen] 地理数据:', geoHeatmapData.value.length, '个省份')
+      updateGeoCharts()
+    } else {
+      console.warn('[DashboardScreen] 地理数据为空')
+    }
+
+    console.log('[DashboardScreen] 数据加载完成')
+
+  } catch (error) {
+    console.error('[DashboardScreen] 数据加载失败:', error)
+    dataError.value = error instanceof Error ? error.message : '数据加载失败，请稍后重试'
+  } finally {
+    dataLoading.value = false
+  }
+}
+
+/**
+ * 刷新数据
+ */
+const refreshData = () => {
+  loadDashboardData()
+}
+
+// ============================================================================
+// 图表更新函数
+// ============================================================================
+
+/**
+ * 更新交易方式柱状图（左侧上半部分）
+ */
+const updateTransactionChart = () => {
+  if (!chart2 || !transactionMethodsData.value.length) {
+    console.warn('[DashboardScreen] chart2 未初始化或数据为空')
+    return
+  }
+
+  const sortedData = [...transactionMethodsData.value].sort((a, b) => (b.value || 0) - (a.value || 0))
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        let result = params[0].name + '<br/>'
+        let total = 0
+        params.forEach((item: any) => {
+          result += item.marker + item.seriesName + ': ' + item.value + '<br/>'
+          total += item.value
+        })
+        result += '总计: ' + total
+        return result
+      }
+    },
+    grid: {
+      left: '15%',
+      top: '40px',
+      right: '5%',
+      bottom: '5%',
+      containLabel: true
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: {
+        show: true,
+        textStyle: {
+          color: 'rgba(255,255,255,.6)',
+          fontSize: '12'
+        }
+      },
+      axisTick: { show: false },
+      axisLine: {
+        show: true,
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)',
+          width: 1,
+          type: 'solid'
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)'
+        }
+      }
+    },
+    yAxis: {
+      type: 'category',
+      data: sortedData.map(item => item.name),
+      axisLine: {
+        show: true,
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)',
+          width: 1,
+          type: 'solid'
+        }
+      },
+      axisTick: { show: false },
+      axisLabel: {
+        show: true,
+        textStyle: {
+          color: 'rgba(255,255,255,.8)',
+          fontSize: '12'
+        }
+      }
+    },
+    series: [{
+      name: '交易方式',
+      type: 'bar',
+      data: sortedData.map(item => item.value || 0),
+      barWidth: '60%',
+      itemStyle: {
+        normal: {
+          color: '#4c60ff',
+          opacity: 0.9
+        }
+      }
+    }]
+  }
+
+  chart2.setOption(option, true)
+  console.log('[DashboardScreen] 交易方式图表已更新')
+}
+
+/**
+ * 更新黑词词云（左侧下半部分）
+ */
+const updateWordCloud = () => {
+  if (!wordCloudChart || !darkKeywordsData.value.length) {
+    console.warn('[DashboardScreen] wordCloudChart 未初始化或数据为空')
+    return
+  }
+
+  const colors = ['#4c60ff', '#27d08a', '#2db7f5', '#f50', '#fa541c', '#faad14', '#722ed1', '#eb2f96']
+
+  const option = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      show: true,
+      formatter: (params: any) => `${params.name}: ${params.value}`
+    },
+    series: [{
+      type: 'wordCloud',
+      gridSize: 2,
+      sizeRange: [12, 32],
+      rotationRange: [0, 0],
+      shape: 'circle',
+      width: '100%',
+      height: '100%',
+      drawOutOfBound: false,
+      textStyle: {
+        fontFamily: 'Arial, sans-serif',
+        fontWeight: 'normal',
+        color: () => colors[Math.floor(Math.random() * colors.length)]
+      },
+      emphasis: {
+        focus: 'self',
+        textStyle: {
+          shadowBlur: 5,
+          shadowColor: '#333'
+        }
+      },
+      data: darkKeywordsData.value.map(item => ({
+        name: item.name,
+        value: item.value
+      }))
+    }]
+  }
+
+  wordCloudChart.setOption(option, true)
+  console.log('[DashboardScreen] 词云图表已更新')
+}
+
+/**
+ * 更新价格趋势图（右侧上部）
+ */
+const updatePriceChart = () => {
+  if (!chart4 || !priceTrendData.value) {
+    console.warn('[DashboardScreen] chart4 未初始化或数据为空')
+    return
+  }
+
+  const { months, data } = priceTrendData.value
+  const colors = ['#0184d5', '#00d887', '#ffa726', '#ff6b6b']
+
+  // 单位映射表：英文单位 -> 中文显示
+  const unitMapping: Record<string, string> = {
+    'g': '克',
+    'piece': '片',
+    'portion': '包',
+    'stick': '根',
+    'kg': '千克',
+    'ml': '毫升',
+    'L': '升'
+  }
+
+  // 格式化单位名称为"单位:中文"格式
+  const formatUnitName = (unit: string): string => {
+    const chinese = unitMapping[unit] || unit
+    return `单位:${chinese}`
+  }
+
+  const series = Object.entries(data).map(([unit, values], index) => ({
+    name: formatUnitName(unit),
+    data: values as number[],
+    type: 'line',
+    smooth: true,
+    symbol: 'circle',
+    symbolSize: 5,
+    showSymbol: false,
+    lineStyle: {
+      normal: {
+        color: colors[index % colors.length],
+        width: 2
+      }
+    },
+    areaStyle: {
+      normal: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
+          offset: 0,
+          color: colors[index % colors.length] + '66' // 添加透明度
+        }, {
+          offset: 0.8,
+          color: colors[index % colors.length] + '1a' // 添加透明度
+        }], false),
+        shadowColor: 'rgba(0, 0, 0, 0.1)'
+      }
+    },
+    itemStyle: {
+      normal: {
+        color: colors[index % colors.length],
+        borderColor: 'rgba(221, 220, 107, .1)',
+        borderWidth: 12
+      }
+    }
+  }))
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        lineStyle: {
+          color: '#dddc6b'
+        }
+      },
+      formatter: (params: any) => {
+        let result = params[0].axisValue + '<br/>'
+        params.forEach((item: any) => {
+          // 去掉"单位:"前缀，只显示中文单位
+          const unitName = item.seriesName.replace('单位:', '')
+          result += `${item.marker} ${unitName}: ${item.value}<br/>`
+        })
+        return result
+      }
+    },
+    legend: {
+      top: '0%',
+      data: Object.keys(data).map(unit => formatUnitName(unit)),
+      textStyle: {
+        color: 'rgba(255,255,255,.5)',
+        fontSize: '12'
+      }
+    },
+    grid: {
+      left: '10',
+      top: '30',
+      right: '10',
+      bottom: '10',
+      containLabel: true
+    },
+    xAxis: [{
+      type: 'category',
+      boundaryGap: false,
+      axisLabel: {
+        textStyle: {
+          color: 'rgba(255,255,255,.6)',
+          fontSize: 12
+        }
+      },
+      axisLine: {
+        lineStyle: {
+          color: 'rgba(255,255,255,.2)'
+        }
+      },
+      data: months
+    }],
+    yAxis: [{
+      type: 'value',
+      name: '价格',
+      axisTick: { show: false },
+      axisLine: {
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)'
+        }
+      },
+      axisLabel: {
+        textStyle: {
+          color: 'rgba(255,255,255,.6)',
+          fontSize: 12
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)'
+        }
+      }
+    }],
+    series
+  }
+
+  chart4.setOption(option, true)
+  console.log('[DashboardScreen] 价格趋势图表已更新')
+}
+
+/**
+ * 更新所有地理相关图表
+ */
+const updateGeoCharts = () => {
+  updateGeoBarChart()
+  updateGeoPieChart()
+  updateMapHeatmap()
+}
+
+/**
+ * 更新热点地区 TOP10 柱状图（右侧中部）
+ */
+const updateGeoBarChart = () => {
+  if (!chart5 || !geoCitiesData.value.length) {
+    console.warn('[DashboardScreen] chart5 未初始化或数据为空')
+    return
+  }
+
+  // 取 TOP10 城市
+  const top10 = geoCitiesData.value.slice(0, 10)
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'shadow'
+      },
+      formatter: (params: any) => {
+        const item = top10[params[0].dataIndex]
+        return `${item.name} (${item.province})<br/>数量: ${item.value}`
+      }
+    },
+    grid: {
+      left: '0%',
+      top: '10px',
+      right: '0%',
+      bottom: '2%',
+      containLabel: true
+    },
+    xAxis: [{
+      type: 'category',
+      data: top10.map(item => item.name),
+      axisLine: {
+        show: true,
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)',
+          width: 1,
+          type: 'solid'
+        }
+      },
+      axisTick: {
+        show: false
+      },
+      axisLabel: {
+        interval: 0,
+        show: true,
+        splitNumber: 15,
+        textStyle: {
+          color: 'rgba(255,255,255,.6)',
+          fontSize: '12'
+        }
+      }
+    }],
+    yAxis: [{
+      type: 'value',
+      axisLabel: {
+        show: true,
+        textStyle: {
+          color: 'rgba(255,255,255,.6)',
+          fontSize: '12'
+        }
+      },
+      axisTick: {
+        show: false
+      },
+      axisLine: {
+        show: true,
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)',
+          width: 1,
+          type: 'solid'
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: 'rgba(255,255,255,.1)'
+        }
+      }
+    }],
+    series: [{
+      type: 'bar',
+      data: top10.map(item => item.value),
+      barWidth: '35%',
+      itemStyle: {
+        normal: {
+          color: '#2f89cf',
+          opacity: 1,
+          barBorderRadius: 5
+        }
+      }
+    }]
+  }
+
+  chart5.setOption(option, true)
+  console.log('[DashboardScreen] 地区排名图表已更新')
+}
+
+/**
+ * 更新地区分布饼图（右侧下部）
+ */
+const updateGeoPieChart = () => {
+  if (!chart6 || !geoHeatmapData.value.length) {
+    console.warn('[DashboardScreen] chart6 未初始化或数据为空')
+    return
+  }
+
+  const option = {
+    color: ['#4c60ff', '#27d08a', '#ff6b6b', '#ffa726', '#ab47bc', '#26c6da', '#66bb6a', '#ffca28'],
+    tooltip: {
+      trigger: 'item',
+      formatter: '{b}: {c} ({d}%)'
+    },
+    legend: {
+      orient: 'vertical',
+      left: 'right',
+      top: 'center',
+      itemWidth: 10,
+      itemHeight: 10,
+      itemGap: 8,
+      data: geoHeatmapData.value.map(item => item.name),
+      textStyle: {
+        color: 'rgba(255,255,255,.8)',
+        fontSize: '11'
+      }
+    },
+    series: [{
+      name: '地区分布',
+      type: 'pie',
+      radius: ['45%', '75%'],  // 环形图：内径45%，外径75%
+      center: ['40%', '50%'],
+      // 移除 roseType，改为普通环形图
+      itemStyle: {
+        borderRadius: 4,
+        borderColor: 'rgba(255,255,255,0.1)',
+        borderWidth: 1
+      },
+      label: {
+        show: false  // 隐藏标签，保持简洁
+      },
+      labelLine: {
+        show: false
+      },
+      emphasis: {
+        label: {
+          show: true,
+          fontSize: '14',
+          fontWeight: 'bold',
+          color: '#fff',
+          formatter: '{b}\n{d}%'
+        },
+        itemStyle: {
+          shadowBlur: 10,
+          shadowOffsetX: 0,
+          shadowColor: 'rgba(0, 0, 0, 0.5)'
+        },
+        scale: true  // 鼠标悬停时放大
+      },
+      data: geoHeatmapData.value.map(item => ({
+        name: item.name,
+        value: item.value
+      }))
+    }]
+  }
+
+  chart6.setOption(option, true)
+  console.log('[DashboardScreen] 地区分布环形图已更新')
+}
+
+/**
+ * 更新地图热力图（中间面板）
+ */
+const updateMapHeatmap = () => {
+  if (!mapChart) {
+    console.warn('[DashboardScreen] mapChart 未初始化')
+    return
+  }
+
+  // 如果有真实数据，使用真实数据；否则使用 mock 数据
+  const hasRealData = geoHeatmapData.value.length > 0
+  const scatterData = mapData.value.data
+
+  // 构建省份数据用于热力着色（保留"省"字以便匹配地图）
+  let provinceData: any[] = []
+  let minVal = 0
+  let maxVal = 100
+
+  if (hasRealData) {
+    // 使用真实数据，保留省份原始名称
+    provinceData = geoHeatmapData.value.map(item => ({
+      name: item.name,  // 保持原样，如"山东省"
+      value: item.value
+    }))
+    const values = geoHeatmapData.value.map(d => d.value)
+    minVal = Math.min(...values)
+    maxVal = Math.max(...values)
+    console.log('[DashboardScreen] 使用真实热力数据:', minVal, '-', maxVal, '省份数:', provinceData.length)
+  } else {
+    // 使用 mock 数据
+    provinceData = [
+      { name: '山东省', value: 239 },
+      { name: '江苏省', value: 200 },
+      { name: '广东省', value: 180 },
+      { name: '浙江省', value: 160 },
+      { name: '河南省', value: 140 }
+    ]
+    maxVal = 239
+    console.log('[DashboardScreen] 使用 mock 热力数据')
+  }
+
+  const option = {
+    tooltip: {
+      trigger: 'item',
+      formatter: function(params: any) {
+        // 如果是散点数据
+        if (params.componentSubType === 'scatter') {
+          if (typeof (params.value)?.[2] == 'undefined') {
+            return params.name + ' : ' + (params.value || 0)
+          } else {
+            return params.name + ' : ' + params.value[2]
+          }
+        }
+        // 如果是地图区域数据
+        if (params.name === '山东' || params.name === '山东省') {
+          return '点击进入山东省地图'
+        }
+        if (params.value !== undefined && params.value !== null) {
+          return `${params.name}: ${params.value}`
+        }
+        return params.name
+      }
+    },
+    // 视觉映射组件：为省份按热力值着色
+    visualMap: {
+      min: minVal,
+      max: maxVal,
+      text: ['高', '低'],
+      realtime: false,
+      calculable: true,
+      inRange: {
+        // 从冷色到暖色的完整渐变：紫→蓝→青→绿→黄→橙→红
+        color: [
+          '#1a0055', // 深紫 - 最低值
+          '#24087a',
+          '#2e119f',
+          '#381ac4',
+          '#4223e8',
+          '#4c3ccf',
+          '#4d5adb',
+          '#5e78eb',
+          '#6f96ed',
+          '#80b4ef',
+          '#91d2f1',
+          '#a2f0f3',
+          '#b3f5d5',
+          '#c4fab7',
+          '#d5ff99',
+          '#e6ff7b',
+          '#f0ff5d',
+          '#fac23f',
+          '#f49421',
+          '#ee6603', // 橙红
+          '#e84885'  // 红紫 - 最高值
+        ]
+      },
+      // 无数据时的颜色（不在 min-max 范围内的省份）
+      outOfRange: {
+        color: ['#1a1a3a']  // 深紫色，不是白色
+      },
+      textStyle: {
+        color: '#fff'
+      },
+      left: 'left',
+      bottom: '10',
+      padding: 10
+    },
+    geo: {
+      map: 'china',
+      label: {
+        emphasis: {
+          show: false
+        }
+      },
+      roam: false,
+      itemStyle: {
+        // 设置默认颜色（无数据时使用）
+        areaColor: '#1a1a3a',  // 深紫色，不是白色
+        borderColor: '#002097',
+        borderWidth: 1
+      },
+      emphasis: {
+        itemStyle: {
+          areaColor: '#fbbf24'  // 鼠标悬停时高亮
+        }
+      }
+    },
+    series: [
+      // 省份热力系列（map 类型，提供数据给 visualMap）
+      {
+        type: 'map',
+        geoIndex: 0,
+        data: provinceData
+      },
+      // 散点系列（scatter，显示数据点）
+      {
+        name: '数据分布',
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        data: convertData(scatterData),
+        symbolSize: function(val: any) {
+          return val[2] / mapData.value.symbolSize
+        },
+        label: {
+          normal: {
+            formatter: '{b}',
+            position: 'right',
+            show: false
+          },
+          emphasis: {
+            show: true
+          }
+        },
+        itemStyle: {
+          normal: {
+            color: '#ffeb7b'
+          }
+        },
+        zlevel: 2, // 确保散点在地图上层
+        z: 2
+      }
+    ]
+  }
+
+  mapChart.setOption(option, true)
+  console.log('[DashboardScreen] 地图已更新（散点图 + 省份热力着色）')
+}
 
 // 懒加载地图数据
 const loadMapData = async (mapType: string) => {
@@ -337,24 +1071,90 @@ const updateMap = async (mapType: string, mapName?: string) => {
   }
   
   console.log(`地图${mapType}已成功注册，开始设置选项`)
-  
+
   const data = mapData.value.data
   let option: any
-  
+
   if (mapType === 'china') {
+    // 中国地图：使用热力着色配置
+    currentMapLevel.value = 'china'
+
+    // 准备省份热力数据
+    const provinceData = geoHeatmapData.value.map(item => ({
+      name: item.name,  // 保留 "山东省" 而不是 "山东"
+      value: item.value
+    }))
+
+    // 计算最小最大值用于 visualMap
+    const values = provinceData.map(d => d.value)
+    const minVal = Math.min(...values, 0)
+    const maxVal = Math.max(...values, 1)
+
     option = {
       tooltip: {
         trigger: 'item',
         formatter: function(params: any) {
+          // 散点数据格式
+          if (params.componentSubType === 'scatter') {
+            if (typeof (params.value)?.[2] == 'undefined') {
+              return params.name + ' : ' + (params.value || 0)
+            } else {
+              return params.name + ' : ' + params.value[2]
+            }
+          }
+          // 地图区域数据
           if (params.name === '山东' || params.name === '山东省') {
             return '点击进入山东省地图'
           }
-          if (typeof (params.value)?.[2] == 'undefined') {
-            return params.name + ' : ' + (params.value || 0)
-          } else {
-            return params.name + ' : ' + params.value[2]
+          if (params.value !== undefined && params.value !== null) {
+            return `${params.name}: ${params.value}`
           }
+          return params.name
         }
+      },
+      // 视觉映射组件：为省份按热力值着色
+      visualMap: {
+        min: minVal,
+        max: maxVal,
+        text: ['高', '低'],
+        realtime: false,
+        calculable: true,
+        inRange: {
+          // 从冷色到暖色的完整渐变：紫→蓝→青→绿→黄→橙→红
+          color: [
+            '#1a0055', // 深紫 - 最低值
+            '#24087a',
+            '#2e119f',
+            '#381ac4',
+            '#4223e8',
+            '#4c3ccf',
+            '#4d5adb',
+            '#5e78eb',
+            '#6f96ed',
+            '#80b4ef',
+            '#91d2f1',
+            '#a2f0f3',
+            '#b3f5d5',
+            '#c4fab7',
+            '#d5ff99',
+            '#e6ff7b',
+            '#f0ff5d',
+            '#fac23f',
+            '#f49421',
+            '#ee6603', // 橙红
+            '#e84885'  // 红紫 - 最高值
+          ]
+        },
+        // 无数据时的颜色（不在 min-max 范围内的省份）
+        outOfRange: {
+          color: ['#1a1a3a']  // 深紫色，不是白色
+        },
+        textStyle: {
+          color: '#fff'
+        },
+        left: 'left',
+        bottom: '10',
+        padding: 10
       },
       geo: {
         map: 'china',
@@ -365,39 +1165,52 @@ const updateMap = async (mapType: string, mapName?: string) => {
         },
         roam: false,
         itemStyle: {
-          normal: {
-            areaColor: '#4c60ff',
-            borderColor: '#002097'
-          },
-          emphasis: {
-            areaColor: '#293fff'
+          // 设置默认颜色（无数据时使用）
+          areaColor: '#1a1a3a',  // 深紫色，不是白色
+          borderColor: '#002097',
+          borderWidth: 1
+        },
+        emphasis: {
+          itemStyle: {
+            areaColor: '#fbbf24'  // 鼠标悬停时高亮
           }
         }
       },
-      series: [{
-        name: '数据分布',
-        type: 'scatter',
-        coordinateSystem: 'geo',
-        data: convertData(data),
-        symbolSize: function(val: any) {
-          return val[2] / mapData.value.symbolSize
+      series: [
+        // 省份热力系列（map 类型，提供数据给 visualMap）
+        {
+          type: 'map',
+          geoIndex: 0,
+          data: provinceData
         },
-        label: {
-          normal: {
-            formatter: '{b}',
-            position: 'right',
-            show: false
+        // 散点系列（scatter，显示数据点）
+        {
+          name: '数据分布',
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          data: convertData(data),
+          symbolSize: function(val: any) {
+            return val[2] / mapData.value.symbolSize
           },
-          emphasis: {
-            show: true
-          }
-        },
-        itemStyle: {
-          normal: {
-            color: '#ffeb7b'
-          }
+          label: {
+            normal: {
+              formatter: '{b}',
+              position: 'right',
+              show: false
+            },
+            emphasis: {
+              show: true
+            }
+          },
+          itemStyle: {
+            normal: {
+              color: '#ffeb7b'
+            }
+          },
+          zlevel: 2, // 确保散点在地图上层
+          z: 2
         }
-      }]
+      ]
     }
   } else if (mapType === 'shandong') {
     option = {
@@ -707,7 +1520,7 @@ const initCharts = async () => {
     // 初始化词云图表
     if (wordCloud.value) {
       try {
-        const wordCloudChart = echarts.init(wordCloud.value)
+        wordCloudChart = echarts.init(wordCloud.value)
         const colors = ['#4c60ff', '#27d08a', '#2db7f5', '#f50', '#fa541c', '#faad14', '#722ed1', '#eb2f96']
         
         const wordCloudOption = {
@@ -1128,42 +1941,46 @@ const handleResize = () => {
   if (chart5) chart5.resize()
   if (chart6) chart6.resize()
   if (mapChart) mapChart.resize()
+  if (wordCloudChart) wordCloudChart.resize()
 }
 
 onMounted(async () => {
   console.log('数据大屏页面已挂载')
-  
+
   // 隐藏fixed-header区域
   const fixedHeader = document.querySelector('.fixed-header') as HTMLElement
   if (fixedHeader) {
     fixedHeader.style.display = 'none'
   }
-  
+
   // 重置地图状态
   currentMapLevel.value = 'china'
   currentCity.value = ''
   mapHistory.value = ['china']
   loadedMaps.value.clear()
-  
+
   // 显示页面加载动画
   pageLoading.value = true
-  
+
   // 初始化时间（减少更新频率）
   updateTime()
   timeTimer = setInterval(updateTime, 60000) // 改为每分钟更新一次
-  
+
   try {
-    // 初始化图表
+    // 初始化图表容器（使用空数据初始化）
     await initCharts()
-    
+
     // 添加窗口resize监听器
     window.addEventListener('resize', handleResize)
-    
+
+    // 加载真实数据
+    await loadDashboardData()
+
     // 延迟隐藏加载动画
     setTimeout(() => {
       pageLoading.value = false
     }, 1000) // 减少等待时间
-    
+
   } catch (error) {
     console.error('页面初始化失败:', error)
     pageLoading.value = false
@@ -1190,6 +2007,7 @@ onUnmounted(() => {
   if (chart5) chart5.dispose()
   if (chart6) chart6.dispose()
   if (mapChart) mapChart.dispose()
+  if (wordCloudChart) wordCloudChart.dispose()
   
   // 移除窗口resize监听器
   window.removeEventListener('resize', handleResize)

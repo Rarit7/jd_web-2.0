@@ -303,6 +303,52 @@ export const serviceApi = {
   }
 }
 
+// 数据分析 API
+export const analysisApi = {
+  /**
+   * 提交数据分析批处理任务
+   */
+  submitAnalysisBatch: async (params: {
+    chat_id: string
+    include_price?: boolean
+    include_transaction?: boolean
+    include_geo?: boolean
+    days?: number
+  }) => {
+    const response = await api.post('/ad-analysis/batch/submit', params)
+    return response.payload
+  },
+
+  /**
+   * 获取批次处理状态
+   */
+  getBatchStatus: async (batchId: string) => {
+    const response = await api.get(`/ad-analysis/batch/${batchId}`)
+    return response.payload
+  },
+
+  /**
+   * 获取批次列表
+   */
+  getBatchesList: async (params?: {
+    chat_id?: string | number
+    status?: string
+    offset?: number
+    limit?: number
+  }) => {
+    const response = await api.get('/ad-analysis/batch', { params })
+    return response.payload
+  },
+
+  /**
+   * 获取任务状态（Celery 任务）
+   */
+  getTaskStatus: async (taskId: string) => {
+    const response = await api.get(`/ad-analysis/task/${taskId}`)
+    return response.payload
+  }
+}
+
 // 导出默认 API 对象
 export default {
   ...adTrackingApi,
@@ -310,5 +356,6 @@ export default {
   ...tagsApi,
   ...processingApi,
   ...statisticsApi,
-  ...serviceApi
+  ...serviceApi,
+  ...analysisApi
 }

@@ -66,10 +66,12 @@ class Application(Flask):
         self.register_blueprint(api, url_prefix=prefix)
 
     def prepare_celery(self):
-        celery.conf.update(app.config)
+        celery.conf.update(self.config)
         self.register_celery()
 
     def register_celery(self):
+        app = self
+
         class ContextTask(celery.Task):
             abstract = True
 

@@ -1,0 +1,54 @@
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
+import path from 'path'
+import AutoImport from 'unplugin-auto-import/vite'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+import Icons from 'unplugin-icons/vite'
+import IconsResolver from 'unplugin-icons/resolver'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [
+    vue(),
+    AutoImport({
+      resolvers: [ElementPlusResolver(), IconsResolver()],
+      imports: ['vue', 'vue-router', 'pinia']
+    }),
+    Components({
+      resolvers: [ElementPlusResolver(), IconsResolver()],
+      dts: 'src/components.d.ts'
+    }),
+    Icons({
+      autoInstall: true,
+    })
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+  server: {
+    port: 8930,
+    host: '0.0.0.0',
+    strictPort: false,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8931',
+        changeOrigin: true,
+        rewrite: (path) => path
+      },
+      '/static': {
+        target: 'http://localhost:8931',
+        changeOrigin: true,
+        rewrite: (path) => path
+      }
+    }
+  },
+  build: {
+    outDir: '../static/dist',
+    emptyOutDir: true,
+    sourcemap: false
+  }
+})

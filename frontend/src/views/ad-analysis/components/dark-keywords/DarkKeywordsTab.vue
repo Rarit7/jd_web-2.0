@@ -78,6 +78,15 @@
               />
             </div>
           </div>
+          <div class="chart-row">
+            <div class="chart-box full-width">
+              <h3>关键词云</h3>
+              <DarkKeywordsWordCloud
+                :data="wordCloudData"
+                :loading="loading"
+              />
+            </div>
+          </div>
         </div>
       </el-tab-pane>
 
@@ -118,6 +127,7 @@ import {
 } from '@/api/adAnalysis'
 import DarkKeywordsPieChart from './DarkKeywordsPieChart.vue'
 import DarkKeywordsTrendChart from './DarkKeywordsTrendChart.vue'
+import DarkKeywordsWordCloud from './DarkKeywordsWordCloud.vue'
 import DarkKeywordsTable from './DarkKeywordsTable.vue'
 import DarkKeywordManagement from './DarkKeywordManagement.vue'
 import type {
@@ -143,6 +153,26 @@ const tableData = ref<DarkKeywordData[]>([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
+
+// 词云数据（从 tableData 聚合关键词词频）
+const wordCloudData = computed(() => {
+  if (!tableData.value || tableData.value.length === 0) {
+    return []
+  }
+  // 聚合关键词词频：相同关键词的 count 相加
+  const keywordMap = new Map<string, number>()
+  tableData.value.forEach(record => {
+    const keyword = record.keyword || ''
+    const count = record.count || 0
+    if (keyword) {
+      keywordMap.set(keyword, (keywordMap.get(keyword) || 0) + count)
+    }
+  })
+  // 转换为数组并按词频降序排序
+  return Array.from(keywordMap.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+})
 
 // Computed
 const availableDrugs = computed(() => {
@@ -291,6 +321,10 @@ watch(
         border-radius: 4px;
         padding: 20px;
         box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+
+        &.full-width {
+          grid-column: 1 / -1;
+        }
 
         h3 {
           margin: 0 0 15px 0;

@@ -114,13 +114,14 @@ const dataError = ref<string | null>(null)
 // 真实数据存储
 const transactionMethodsData = ref<TransactionMethodData[]>([])
 const darkKeywordsData = ref<{name: string; value: number}[]>([])
+const darkKeywordsTrendData = ref<{months: string[]; data: Record<string, number[]>} | null>(null)
 const priceTrendData = ref<PriceTrendResponse | null>(null)
 const geoHeatmapData = ref<{name: string; value: number}[]>([])
 const geoCitiesData = ref<{name: string; value: number; province: string}[]>([])
 
 // 筛选参数
 const filters = ref({
-  chat_id: undefined as number | undefined,
+  chat_id: undefined as number | undefined,  // undefined = 全表数据
   days: 365
 })
 
@@ -184,7 +185,7 @@ const wordCloudData = ref({
 
 
 const echart4Data = ref({
-  title: '价格趋势',
+  title: '毒品种类趋势',
   data: [
     { name: '产量', value: [3, 4, 3, 4, 3, 4, 3, 6, 2, 4, 2, 4, 3, 4, 3, 4, 3, 4, 3, 6, 2, 4, 4] },
     { name: '销量', value: [5, 3, 5, 6, 1, 5, 3, 5, 6, 4, 6, 4, 8, 3, 5, 6, 1, 5, 3, 7, 2, 5, 8] }
@@ -266,7 +267,10 @@ const loadDashboardData = async () => {
   dataError.value = null
 
   try {
-    console.log('[DashboardScreen] 开始加载数据...')
+    console.log('[DashboardScreen] 开始加载数据...', {
+      chat_id: filters.value.chat_id,
+      days: filters.value.days
+    })
 
     const data = await fetchDashboardData({
       chat_id: filters.value.chat_id,
@@ -295,6 +299,15 @@ const loadDashboardData = async () => {
       updateWordCloud()
     } else {
       console.warn('[DashboardScreen] 黑词关键词数据为空')
+    }
+
+    // 更新黑词趋势数据
+    if (data.darkKeywordsTrend) {
+      darkKeywordsTrendData.value = data.darkKeywordsTrend
+      console.log('[DashboardScreen] 黑词趋势数据已加载')
+      updateTrendChart()
+    } else {
+      console.warn('[DashboardScreen] 黑词趋势数据为空')
     }
 
     // 更新价格趋势数据
@@ -485,103 +498,63 @@ const updateWordCloud = () => {
  * 更新价格趋势图（右侧上部）
  */
 const updatePriceChart = () => {
-  if (!chart4 || !priceTrendData.value) {
+  if (!chart4 || !darkKeywordsTrendData.value) {
     console.warn('[DashboardScreen] chart4 未初始化或数据为空')
     return
   }
 
-  const { months, data } = priceTrendData.value
-  const colors = ['#0184d5', '#00d887', '#ffa726', '#ff6b6b']
+  const { months, data } = darkKeywordsTrendData.value
+  const colors = ['#4c60ff', '#27d08a', '#2db7f5', '#f50', '#fa541c',
+                '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#52c41a']
 
-  // 单位映射表：英文单位 -> 中文显示
-  const unitMapping: Record<string, string> = {
-    'g': '克',
-    'piece': '片',
-    'portion': '包',
-    'stick': '根',
-    'kg': '千克',
-    'ml': '毫升',
-    'L': '升'
-  }
-
-  // 格式化单位名称为"单位:中文"格式
-  const formatUnitName = (unit: string): string => {
-    const chinese = unitMapping[unit] || unit
-    return `单位:${chinese}`
-  }
-
-  const series = Object.entries(data).map(([unit, values], index) => ({
-    name: formatUnitName(unit),
+  // 构建系列数据
+  const series = Object.entries(data).map(([name, values], index) => ({
+    name,
     data: values as number[],
     type: 'line',
     smooth: true,
     symbol: 'circle',
-    symbolSize: 5,
-    showSymbol: false,
+    symbolSize: 6,
     lineStyle: {
-      normal: {
-        color: colors[index % colors.length],
-        width: 2
-      }
-    },
-    areaStyle: {
-      normal: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
-          offset: 0,
-          color: colors[index % colors.length] + '66' // 添加透明度
-        }, {
-          offset: 0.8,
-          color: colors[index % colors.length] + '1a' // 添加透明度
-        }], false),
-        shadowColor: 'rgba(0, 0, 0, 0.1)'
-      }
-    },
-    itemStyle: {
-      normal: {
-        color: colors[index % colors.length],
-        borderColor: 'rgba(221, 220, 107, .1)',
-        borderWidth: 12
-      }
+      color: colors[index % colors.length],
+      width: 2
     }
   }))
 
   const option = {
     tooltip: {
       trigger: 'axis',
-      axisPointer: {
-        lineStyle: {
-          color: '#dddc6b'
-        }
-      },
+      axisPointer: { type: 'cross' },
       formatter: (params: any) => {
         let result = params[0].axisValue + '<br/>'
         params.forEach((item: any) => {
-          // 去掉"单位:"前缀，只显示中文单位
-          const unitName = item.seriesName.replace('单位:', '')
-          result += `${item.marker} ${unitName}: ${item.value}<br/>`
+          result += `${item.marker} ${item.seriesName}: ${item.value}<br/>`
         })
         return result
       }
     },
     legend: {
-      top: '0%',
-      data: Object.keys(data).map(unit => formatUnitName(unit)),
+      data: Object.keys(data),
+      top: 10,
+      type: 'scroll',
       textStyle: {
-        color: 'rgba(255,255,255,.5)',
-        fontSize: '12'
+        color: 'rgba(255,255,255,.8)',
+        fontSize: 12
       }
     },
     grid: {
-      left: '10',
-      top: '30',
-      right: '10',
-      bottom: '10',
+      left: '3%',
+      right: '4%',
+      bottom: '3%',
+      top: '15%',
       containLabel: true
     },
-    xAxis: [{
+    xAxis: {
       type: 'category',
       boundaryGap: false,
+      data: months,
       axisLabel: {
+        interval: Math.floor(months.length / 12),
         textStyle: {
           color: 'rgba(255,255,255,.6)',
           fontSize: 12
@@ -591,12 +564,15 @@ const updatePriceChart = () => {
         lineStyle: {
           color: 'rgba(255,255,255,.2)'
         }
-      },
-      data: months
-    }],
-    yAxis: [{
+      }
+    },
+    yAxis: {
       type: 'value',
-      name: '价格',
+      name: '数量',
+      nameTextStyle: {
+        color: 'rgba(255,255,255,.6)',
+        padding: [0, 0, 0, 5]
+      },
       axisTick: { show: false },
       axisLine: {
         lineStyle: {
@@ -614,12 +590,19 @@ const updatePriceChart = () => {
           color: 'rgba(255,255,255,.1)'
         }
       }
-    }],
+    },
     series
   }
 
   chart4.setOption(option, true)
-  console.log('[DashboardScreen] 价格趋势图表已更新')
+  console.log('[DashboardScreen] 黑词趋势图表已更新')
+}
+
+/**
+ * 更新趋势图（黑词趋势分析）
+ */
+const updateTrendChart = () => {
+  updatePriceChart()
 }
 
 /**
@@ -853,10 +836,7 @@ const updateMapHeatmap = () => {
             return params.name + ' : ' + params.value[2]
           }
         }
-        // 如果是地图区域数据
-        if (params.name === '山东' || params.name === '山东省') {
-          return '点击进入山东省地图'
-        }
+        // 地图区域数据统一显示格式（包括山东省）
         if (params.value !== undefined && params.value !== null) {
           return `${params.name}: ${params.value}`
         }
@@ -871,34 +851,34 @@ const updateMapHeatmap = () => {
       realtime: false,
       calculable: true,
       inRange: {
-        // 从冷色到暖色的完整渐变：紫→蓝→青→绿→黄→橙→红
+        // 从黄到红的渐变：黄色（低值）→ 橙色 → 红色（高值）
         color: [
-          '#1a0055', // 深紫 - 最低值
-          '#24087a',
-          '#2e119f',
-          '#381ac4',
-          '#4223e8',
-          '#4c3ccf',
-          '#4d5adb',
-          '#5e78eb',
-          '#6f96ed',
-          '#80b4ef',
-          '#91d2f1',
-          '#a2f0f3',
-          '#b3f5d5',
-          '#c4fab7',
-          '#d5ff99',
-          '#e6ff7b',
-          '#f0ff5d',
-          '#fac23f',
-          '#f49421',
-          '#ee6603', // 橙红
-          '#e84885'  // 红紫 - 最高值
+          '#ffe761', // 黄色 - 最低值
+          '#ffd93d',
+          '#ffcb19',
+          '#ffbd00',
+          '#ffaf00',
+          '#ffa100',
+          '#ff9300',
+          '#ff8500',
+          '#ff7700',
+          '#ff6900',
+          '#ff5b00',
+          '#ff4d00',
+          '#ff3f00',
+          '#ff3100',
+          '#ff2300',
+          '#ff1500',
+          '#ff0700',
+          '#ff0000', // 纯红
+          '#f50000',
+          '#eb0000',
+          '#e10000'  // 深红 - 最高值
         ]
       },
       // 无数据时的颜色（不在 min-max 范围内的省份）
       outOfRange: {
-        color: ['#1a1a3a']  // 深紫色，不是白色
+        color: ['#fff5d6']  // 浅黄色，表示无数据
       },
       textStyle: {
         color: '#fff'
@@ -917,7 +897,7 @@ const updateMapHeatmap = () => {
       roam: false,
       itemStyle: {
         // 设置默认颜色（无数据时使用）
-        areaColor: '#1a1a3a',  // 深紫色，不是白色
+        areaColor: '#fff5d6',  // 浅黄色，表示无数据
         borderColor: '#002097',
         borderWidth: 1
       },
@@ -1102,10 +1082,7 @@ const updateMap = async (mapType: string, mapName?: string) => {
               return params.name + ' : ' + params.value[2]
             }
           }
-          // 地图区域数据
-          if (params.name === '山东' || params.name === '山东省') {
-            return '点击进入山东省地图'
-          }
+          // 地图区域数据统一显示格式（包括山东省）
           if (params.value !== undefined && params.value !== null) {
             return `${params.name}: ${params.value}`
           }
@@ -1120,34 +1097,34 @@ const updateMap = async (mapType: string, mapName?: string) => {
         realtime: false,
         calculable: true,
         inRange: {
-          // 从冷色到暖色的完整渐变：紫→蓝→青→绿→黄→橙→红
+          // 从黄到红的渐变：黄色（低值）→ 橙色 → 红色（高值）
           color: [
-            '#1a0055', // 深紫 - 最低值
-            '#24087a',
-            '#2e119f',
-            '#381ac4',
-            '#4223e8',
-            '#4c3ccf',
-            '#4d5adb',
-            '#5e78eb',
-            '#6f96ed',
-            '#80b4ef',
-            '#91d2f1',
-            '#a2f0f3',
-            '#b3f5d5',
-            '#c4fab7',
-            '#d5ff99',
-            '#e6ff7b',
-            '#f0ff5d',
-            '#fac23f',
-            '#f49421',
-            '#ee6603', // 橙红
-            '#e84885'  // 红紫 - 最高值
+            '#ffe761', // 黄色 - 最低值
+            '#ffd93d',
+            '#ffcb19',
+            '#ffbd00',
+            '#ffaf00',
+            '#ffa100',
+            '#ff9300',
+            '#ff8500',
+            '#ff7700',
+            '#ff6900',
+            '#ff5b00',
+            '#ff4d00',
+            '#ff3f00',
+            '#ff3100',
+            '#ff2300',
+            '#ff1500',
+            '#ff0700',
+            '#ff0000', // 纯红
+            '#f50000',
+            '#eb0000',
+            '#e10000'  // 深红 - 最高值
           ]
         },
         // 无数据时的颜色（不在 min-max 范围内的省份）
         outOfRange: {
-          color: ['#1a1a3a']  // 深紫色，不是白色
+          color: ['#fff5d6']  // 浅黄色，表示无数据
         },
         textStyle: {
           color: '#fff'
@@ -1166,7 +1143,7 @@ const updateMap = async (mapType: string, mapName?: string) => {
         roam: false,
         itemStyle: {
           // 设置默认颜色（无数据时使用）
-          areaColor: '#1a1a3a',  // 深紫色，不是白色
+          areaColor: '#fff5d6',  // 浅黄色，表示无数据
           borderColor: '#002097',
           borderWidth: 1
         },

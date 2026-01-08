@@ -22,6 +22,8 @@ export interface DashboardDataResponse {
   transactionMethods: TransactionMethodData[] | null
   /** 黑词分析数据（词云格式：关键词+词频） */
   darkKeywords: Array<{ name: string; value: number }> | null
+  /** 黑词趋势数据 */
+  darkKeywordsTrend: { months: string[]; data: Record<string, number[]> } | null
   /** 价格趋势数据 */
   priceTrend: PriceTrendResponse | null
   /** 地理热力图数据 */
@@ -94,10 +96,13 @@ export async function fetchDashboardData(
 
     // 处理黑词数据（从 table 中聚合关键词词频，用于词云）
     let darkKeywords: Array<{ name: string; value: number }> | null = null
+    let darkKeywordsTrend: { months: string[]; data: Record<string, number[]> } | null = null
     let darkKeywordsError: Error | null = null
     if (darkKeywordsResult.status === 'fulfilled') {
-      const tableData = darkKeywordsResult.value.payload?.table || []
-      // 聚合关键词词频：相同关键词的 count 相加
+      const payload = darkKeywordsResult.value.payload
+
+      // 提取词云数据（从 table 中聚合关键词词频）
+      const tableData = payload?.table || []
       const keywordMap = new Map<string, number>()
       tableData.forEach((record: any) => {
         const keyword = record.keyword || ''
@@ -111,7 +116,19 @@ export async function fetchDashboardData(
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value)
         .slice(0, 50)
+
+      // 提取趋势数据（line 字段）
+      if (payload?.line && payload.line.months && payload.line.data) {
+        darkKeywordsTrend = {
+          months: payload.line.months,
+          data: payload.line.data
+        }
+      }
+
       console.log('[DashboardApi] 黑词数据加载成功:', darkKeywords.length, '个关键词')
+      if (darkKeywordsTrend) {
+        console.log('[DashboardApi] 黑词趋势数据加载成功')
+      }
     } else {
       darkKeywordsError = darkKeywordsResult.reason
       console.error('[DashboardApi] 黑词数据加载失败:', darkKeywordsError)
@@ -163,6 +180,7 @@ export async function fetchDashboardData(
     return {
       transactionMethods,
       darkKeywords,
+      darkKeywordsTrend,
       priceTrend,
       geoHeatmap,
       errors: {

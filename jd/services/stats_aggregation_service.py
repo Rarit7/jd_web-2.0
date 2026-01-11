@@ -1,4 +1,12 @@
-"""统计聚合服务 - 负责各类统计数据的计算和缓存"""
+"""
+统计聚合服务 - 负责各类统计数据的查询和聚合
+
+注意：
+- 从 MySQL 统计表查询聚合数据（全局统计，不区分 chat_id）
+- 不再使用 Redis 缓存
+- API 参数保持兼容性（chat_id 参数被接受但忽略）
+- use_cache 参数被接受但忽略（数据直接从 MySQL 统计表获取）
+"""
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -12,13 +20,26 @@ from jd.models.ad_tracking_geo_location import AdTrackingGeoLocation
 from jd.models.ad_tracking_dark_keyword import AdTrackingDarkKeyword
 from jd.models.ad_tracking_dark_keyword import AdTrackingDarkKeywordDrug
 from jd.models.ad_tracking_dark_keyword import AdTrackingDarkKeywordCategory
-from jd.services.cache_service import CacheService
+from jd.models.ad_tracking_daily_stats import (
+    AdTrackingDarkKeywordDailyStats,
+    AdTrackingTransactionMethodDailyStats,
+    AdTrackingPriceDailyStats,
+    AdTrackingGeoLocationDailyStats
+)
 
 logger = logging.getLogger(__name__)
 
 
 class StatsAggregationService:
-    """统计聚合服务 - 负责各类统计数据的计算和缓存"""
+    """
+    统计聚合服务 - 负责各类统计数据的查询和聚合
+
+    迁移说明：
+    - 饼图和趋势线数据从 MySQL 统计表聚合（全局统计）
+    - 表格数据从源表查询（显示详细记录）
+    - 忽略 chat_id 参数（完全兼容前端调用）
+    - 移除所有 Redis 缓存逻辑
+    """
 
     @staticmethod
     def get_dark_keywords_stats(
@@ -28,13 +49,13 @@ class StatsAggregationService:
         use_cache: bool = True
     ) -> Dict:
         """
-        获取黑词分析统计
+        获取黑词分析统计（全局统计，忽略 chat_id）
 
         Args:
-            chat_id: 群组ID（可选，不提供时统计全表）
-            tag_ids: 标签ID列表（可选）
+            chat_id: 群组ID（已弃用，用于 API 兼容性）
+            tag_ids: 标签ID列表（已弃用，用于 API 兼容性）
             days: 统计天数
-            use_cache: 是否使用缓存
+            use_cache: 是否使用缓存（已弃用，数据直接从 MySQL 统计表获取）
 
         Returns:
             dict: 包含 pie、line、table 三部分数据
@@ -44,33 +65,23 @@ class StatsAggregationService:
                     'table': [...]
                 }
         """
-        # 尝试从缓存获取
-        cache_key = f'dark_keywords:{"all" if not chat_id else chat_id}:{days}'
-        if tag_ids:
-            cache_key += f':{",".join(map(str, sorted(tag_ids)))}'
-
-        if use_cache:
-            cached = CacheService.get(cache_key)
-            if cached:
-                logger.debug(f"黑词统计命中缓存: {cache_key}")
-                return cached
-
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = (datetime.now() - timedelta(days=days)).date()
+        end_date = datetime.now().date()
 
         try:
-            # 1. 构建圆环图数据
-            pie_data = StatsAggregationService._build_dark_keywords_pie(
-                chat_id, tag_ids, start_date
+            # 1. 从统计表构建圆环图数据（全局统计）
+            pie_data = StatsAggregationService._build_dark_keywords_pie_from_stats(
+                start_date, end_date
             )
 
-            # 2. 构建趋势线数据
-            line_data = StatsAggregationService._build_dark_keywords_line(
-                chat_id, tag_ids, start_date
+            # 2. 从统计表构建趋势线数据（全局统计）
+            line_data = StatsAggregationService._build_dark_keywords_line_from_stats(
+                start_date, end_date
             )
 
-            # 3. 构建表格数据
+            # 3. 从源表构建表格数据（详细记录）
             table_data = StatsAggregationService._build_dark_keywords_table(
-                chat_id, tag_ids, start_date
+                start_date
             )
 
             result = {
@@ -79,39 +90,20 @@ class StatsAggregationService:
                 'table': table_data
             }
 
-            # 缓存结果（24小时）
-            if use_cache:
-                CacheService.set(cache_key, result, ttl=86400)
-                logger.debug(f"黑词统计缓存已设置: {cache_key}")
-
+            logger.info(f"黑词统计查询完成: {len(pie_data)} 毒品, {len(table_data)} 记录")
             return result
         except Exception as e:
             logger.error(f"黑词统计查询失败: {e}")
             return {'pie': [], 'line': {}, 'table': []}
 
     @staticmethod
-    def _build_dark_keywords_pie(chat_id: Optional[int], tag_ids: Optional[List[int]], start_date: datetime) -> List[Dict]:
-        """构建圆环图数据（按毒品名称统计）"""
-        logger.debug("构建黑词圆环图数据")
+    def _build_dark_keywords_pie_from_stats(start_date: datetime.date, end_date: datetime.date) -> List[Dict]:
+        """
+        从统计表构建圆环图数据（按毒品名称统计，全局）
+        """
+        logger.debug(f"从统计表构建黑词圆环图数据: {start_date} ~ {end_date}")
 
-        query = db.session.query(
-            AdTrackingDarkKeyword.drug_id,
-            func.sum(AdTrackingDarkKeyword.count).label('total_count')
-        ).filter(
-            AdTrackingDarkKeyword.msg_date >= start_date,
-            AdTrackingDarkKeyword.drug_id.isnot(None)
-        )
-
-        # 如果指定了chat_id，添加过滤条件
-        if chat_id:
-            query = query.filter(AdTrackingDarkKeyword.chat_id == str(chat_id))
-
-        # 如果指定了标签，需要通过标签关联查询
-        if tag_ids:
-            # 这里假设标签与黑词记录有关联，如果需要可以添加
-            pass
-
-        results = query.group_by(AdTrackingDarkKeyword.drug_id).all()
+        results = AdTrackingDarkKeywordDailyStats.aggregate_by_drug(start_date, end_date)
 
         # 获取毒品名称映射
         drug_names = {}
@@ -126,7 +118,7 @@ class StatsAggregationService:
             drug_name = drug_names.get(drug_id, f'未知({drug_id})')
             pie_data.append({
                 'name': drug_name,
-                'value': int(total_count)
+                'value': int(total_count or 0)
             })
 
         # 按数量降序排序
@@ -134,27 +126,13 @@ class StatsAggregationService:
         return pie_data
 
     @staticmethod
-    def _build_dark_keywords_line(chat_id: Optional[int], tag_ids: Optional[List[int]], start_date: datetime) -> Dict:
-        """构建趋势线数据"""
-        logger.debug("构建黑词趋势线数据")
+    def _build_dark_keywords_line_from_stats(start_date: datetime.date, end_date: datetime.date) -> Dict:
+        """
+        从统计表构建趋势线数据（按月份和毒品，全局）
+        """
+        logger.debug(f"从统计表构建黑词趋势线数据: {start_date} ~ {end_date}")
 
-        query = db.session.query(
-            func.date_format(AdTrackingDarkKeyword.msg_date, '%Y-%m').label('month'),
-            AdTrackingDarkKeyword.drug_id,
-            func.sum(AdTrackingDarkKeyword.count).label('total_count')
-        ).filter(
-            AdTrackingDarkKeyword.msg_date >= start_date
-        )
-
-        # 如果指定了chat_id，添加过滤条件
-        if chat_id:
-            query = query.filter(AdTrackingDarkKeyword.chat_id == str(chat_id))
-
-        # 如果指定了标签，需要通过标签关联查询
-        if tag_ids:
-            pass
-
-        results = query.group_by('month', AdTrackingDarkKeyword.drug_id).all()
+        results = AdTrackingDarkKeywordDailyStats.aggregate_by_month_and_drug(start_date, end_date)
 
         # 构建趋势数据
         months = sorted(set(m[0] for m in results if m[0]))
@@ -184,26 +162,18 @@ class StatsAggregationService:
         }
 
     @staticmethod
-    def _build_dark_keywords_table(chat_id: Optional[int], tag_ids: Optional[List[int]], start_date: datetime) -> List[Dict]:
-        """构建表格数据"""
-        logger.debug("构建黑词表格数据")
+    def _build_dark_keywords_table(start_date: datetime.date) -> List[Dict]:
+        """
+        从源表构建表格数据（详细记录，全局）
+        """
+        logger.debug(f"从源表构建黑词表格数据: {start_date} 之后")
 
-        query = db.session.query(AdTrackingDarkKeyword).filter(
+        records = db.session.query(AdTrackingDarkKeyword).filter(
             AdTrackingDarkKeyword.msg_date >= start_date
-        )
-
-        # 如果指定了chat_id，添加过滤条件
-        if chat_id:
-            query = query.filter(AdTrackingDarkKeyword.chat_id == str(chat_id))
-
-        # 如果指定了标签，需要通过标签关联查询
-        if tag_ids:
-            pass
-
-        records = query.order_by(
+        ).order_by(
             AdTrackingDarkKeyword.msg_date.desc(),
             AdTrackingDarkKeyword.created_at.desc()
-        ).all()
+        ).limit(1000).all()
 
         # 转换为字典格式（包含关联的毒品和分类信息）
         table_data = []
@@ -220,12 +190,12 @@ class StatsAggregationService:
         use_cache: bool = True
     ) -> Dict:
         """
-        获取交易方式分布
+        获取交易方式分布（全局统计，忽略 chat_id）
 
         Args:
-            chat_id: 群组ID (可选，不提供时统计全表)
+            chat_id: 群组ID（已弃用，用于 API 兼容性）
             days: 统计天数
-            use_cache: 是否使用缓存
+            use_cache: 是否使用缓存（已弃用）
 
         Returns:
             dict:
@@ -234,68 +204,33 @@ class StatsAggregationService:
                     'line': {'months': [...], 'data': {...}}
                 }
         """
-        cache_key = f'transaction_methods:{"all" if not chat_id else chat_id}:{days}'
-
-        if use_cache:
-            cached = CacheService.get(cache_key)
-            if cached:
-                logger.debug(f"交易方式分布命中缓存: {cache_key}")
-                return cached
-
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = (datetime.now() - timedelta(days=days)).date()
+        end_date = datetime.now().date()
 
         try:
-            # 1. 按方式总数统计 (柱状图)
-            query = db.session.query(
-                AdTrackingTransactionMethod.method,
-                func.count(AdTrackingTransactionMethod.id).label('count')
-            ).filter(
-                AdTrackingTransactionMethod.msg_date >= start_date
-            )
-
-            # 如果指定了 chat_id，则添加该过滤条件
-            if chat_id:
-                query = query.filter(AdTrackingTransactionMethod.chat_id == chat_id)
-
-            bar_data = query.group_by(
-                AdTrackingTransactionMethod.method
-            ).order_by(
-                func.count(AdTrackingTransactionMethod.id).desc()
-            ).all()
+            # 1. 按方式总数统计 (柱状图，从统计表聚合)
+            bar_results = AdTrackingTransactionMethodDailyStats.aggregate_by_method(start_date, end_date)
 
             bar_result = [
                 {'name': method, 'value': count, 'id': idx}
-                for idx, (method, count) in enumerate(bar_data)
+                for idx, (method, count) in enumerate(bar_results)
                 if method  # 过滤掉 None 值
             ]
 
-            # 2. 按月趋势统计 (折线图)
-            line_query = db.session.query(
-                func.date_format(AdTrackingTransactionMethod.msg_date, '%Y-%m').label('month'),
-                AdTrackingTransactionMethod.method,
-                func.count(AdTrackingTransactionMethod.id).label('count')
-            ).filter(
-                AdTrackingTransactionMethod.msg_date >= start_date
+            # 2. 按月趋势统计 (折线图，从统计表聚合)
+            line_results = AdTrackingTransactionMethodDailyStats.aggregate_by_month_and_method(
+                start_date, end_date
             )
 
-            # 如果指定了 chat_id，则添加该过滤条件
-            if chat_id:
-                line_query = line_query.filter(AdTrackingTransactionMethod.chat_id == chat_id)
-
-            line_data = line_query.group_by(
-                'month',
-                AdTrackingTransactionMethod.method
-            ).all()
-
             # 构建趋势数据
-            months = sorted(set(m[0] for m in line_data if m[0]))
-            methods = [r[0] for r in bar_data if r[0]]
+            months = sorted(set(m[0] for m in line_results if m[0]))
+            methods = [r[0] for r in bar_results if r[0]]
 
             trend_data = {}
             for method in methods:
                 trend_data[method] = [
                     int(next(
-                        (c[2] for c in line_data if c[0] == month and c[1] == method),
+                        (c[2] for c in line_results if c[0] == month and c[1] == method),
                         0
                     ))
                     for month in months
@@ -309,10 +244,7 @@ class StatsAggregationService:
                 }
             }
 
-            if use_cache:
-                CacheService.set(cache_key, result, ttl=86400)
-                logger.debug(f"交易方式分布缓存已设置: {cache_key}")
-
+            logger.info(f"交易方式分布查询完成: {len(bar_result)} 方式")
             return result
         except Exception as e:
             logger.error(f"交易方式分布查询失败: {e}")
@@ -326,13 +258,13 @@ class StatsAggregationService:
         use_cache: bool = True
     ) -> Dict:
         """
-        获取价格趋势数据
+        获取价格趋势数据（全局统计，忽略 chat_id）
 
         Args:
-            chat_id: 群组ID (可选，不提供时统计全表)
+            chat_id: 群组ID（已弃用，用于 API 兼容性）
             unit: 价格单位（可选，如果指定则只返回该单位的数据）
             days: 统计天数
-            use_cache: 是否使用缓存
+            use_cache: 是否使用缓存（已弃用）
 
         Returns:
             dict:
@@ -341,35 +273,14 @@ class StatsAggregationService:
                     'data': {'g': [100, 110, ...], ...}
                 }
         """
-        cache_key = f'price_trend:{"all" if not chat_id else chat_id}:{unit}:{days}'
-
-        if use_cache:
-            cached = CacheService.get(cache_key)
-            if cached:
-                logger.debug(f"价格趋势命中缓存: {cache_key}")
-                return cached
-
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = (datetime.now() - timedelta(days=days)).date()
+        end_date = datetime.now().date()
 
         try:
-            # 按月、单位统计平均价格
-            query = db.session.query(
-                func.date_format(AdTrackingPrice.msg_date, '%Y-%m').label('month'),
-                AdTrackingPrice.unit,
-                func.avg(AdTrackingPrice.price_value).label('avg_price'),
-                func.count(AdTrackingPrice.id).label('count')
-            ).filter(
-                AdTrackingPrice.msg_date >= start_date
+            # 从统计表按月、单位聚合平均价格
+            monthly_prices = AdTrackingPriceDailyStats.aggregate_by_month_and_unit(
+                start_date, end_date
             )
-
-            # 如果指定了 chat_id，则添加该过滤条件
-            if chat_id:
-                query = query.filter(AdTrackingPrice.chat_id == chat_id)
-
-            monthly_prices = query.group_by(
-                'month',
-                AdTrackingPrice.unit
-            ).order_by('month').all()
 
             # 构建响应
             months = sorted(set(m[0] for m in monthly_prices if m[0]))
@@ -397,10 +308,7 @@ class StatsAggregationService:
                 'data': data
             }
 
-            if use_cache:
-                CacheService.set(cache_key, result, ttl=86400)
-                logger.debug(f"价格趋势缓存已设置: {cache_key}")
-
+            logger.info(f"价格趋势查询完成: {len(all_units)} 单位")
             return result
         except Exception as e:
             logger.error(f"价格趋势查询失败: {e}")
@@ -413,12 +321,12 @@ class StatsAggregationService:
         use_cache: bool = True
     ) -> Dict:
         """
-        获取地理热力图数据
+        获取地理热力图数据（全局统计，忽略 chat_id）
 
         Args:
-            chat_id: 群组ID (可选，不提供时统计全表)
+            chat_id: 群组ID（已弃用，用于 API 兼容性）
             days: 统计天数
-            use_cache: 是否使用缓存
+            use_cache: 是否使用缓存（已弃用）
 
         Returns:
             dict:
@@ -428,88 +336,50 @@ class StatsAggregationService:
                     'all_cities': [{'name': '成都市', 'value': 600, 'province': '四川省'}, ...]
                 }
         """
-        cache_key = f'geo_heatmap:{"all" if not chat_id else chat_id}:{days}'
-
-        if use_cache:
-            cached = CacheService.get(cache_key)
-            if cached:
-                logger.debug(f"地理热力图命中缓存: {cache_key}")
-                return cached
-
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = (datetime.now() - timedelta(days=days)).date()
+        end_date = datetime.now().date()
 
         try:
-            # 1. 按省份统计
-            prov_query = db.session.query(
-                AdTrackingGeoLocation.province,
-                func.count(AdTrackingGeoLocation.id).label('count')
-            ).filter(
-                AdTrackingGeoLocation.msg_date >= start_date
+            # 1. 按省份统计（从统计表聚合）
+            province_results = AdTrackingGeoLocationDailyStats.aggregate_by_province(
+                start_date, end_date
             )
-
-            # 如果指定了 chat_id，则添加该过滤条件
-            if chat_id:
-                prov_query = prov_query.filter(AdTrackingGeoLocation.chat_id == chat_id)
-
-            province_stats = prov_query.group_by(
-                AdTrackingGeoLocation.province
-            ).all()
 
             provinces = [
                 {'name': prov, 'value': count}
-                for prov, count in province_stats
+                for prov, count in province_results
                 if prov
             ]
 
-            # 2. 山东省按市统计
+            # 2. 山东省按市统计（从统计表聚合）
             shandong_cities = []
             if any(p['name'] == '山东省' for p in provinces):
-                city_query = db.session.query(
-                    AdTrackingGeoLocation.city,
-                    func.count(AdTrackingGeoLocation.id).label('count')
+                city_results = db.session.query(
+                    AdTrackingGeoLocationDailyStats.city,
+                    func.sum(AdTrackingGeoLocationDailyStats.record_count).label('total_count')
                 ).filter(
-                    AdTrackingGeoLocation.province == '山东省',
-                    AdTrackingGeoLocation.msg_date >= start_date
-                )
-
-                # 如果指定了 chat_id，则添加该过滤条件
-                if chat_id:
-                    city_query = city_query.filter(AdTrackingGeoLocation.chat_id == chat_id)
-
-                city_stats = city_query.group_by(
-                    AdTrackingGeoLocation.city
+                    AdTrackingGeoLocationDailyStats.province == '山东省',
+                    AdTrackingGeoLocationDailyStats.stat_date >= start_date,
+                    AdTrackingGeoLocationDailyStats.stat_date <= end_date,
+                    AdTrackingGeoLocationDailyStats.city.isnot(None)
+                ).group_by(
+                    AdTrackingGeoLocationDailyStats.city
                 ).all()
 
                 shandong_cities = [
                     {'name': city, 'value': count}
-                    for city, count in city_stats
+                    for city, count in city_results
                     if city
                 ]
 
-            # 3. 所有城市统计（用于热点排名 TOP 50）
-            all_cities_query = db.session.query(
-                AdTrackingGeoLocation.province,
-                AdTrackingGeoLocation.city,
-                func.count(AdTrackingGeoLocation.id).label('count')
-            ).filter(
-                AdTrackingGeoLocation.msg_date >= start_date,
-                AdTrackingGeoLocation.city.isnot(None)
+            # 3. 所有城市统计（用于热点排名 TOP 50，从统计表聚合）
+            all_cities_results = AdTrackingGeoLocationDailyStats.aggregate_by_city(
+                start_date, end_date
             )
-
-            # 如果指定了 chat_id，则添加该过滤条件
-            if chat_id:
-                all_cities_query = all_cities_query.filter(AdTrackingGeoLocation.chat_id == chat_id)
-
-            all_cities_stats = all_cities_query.group_by(
-                AdTrackingGeoLocation.province,
-                AdTrackingGeoLocation.city
-            ).order_by(
-                func.count(AdTrackingGeoLocation.id).desc()
-            ).limit(50).all()
 
             all_cities = [
                 {'name': city, 'value': count, 'province': prov}
-                for prov, city, count in all_cities_stats
+                for city, prov, count in all_cities_results[:50]
                 if city and prov
             ]
 
@@ -519,10 +389,7 @@ class StatsAggregationService:
                 'all_cities': all_cities  # 已按 count DESC 排序，TOP 50
             }
 
-            if use_cache:
-                CacheService.set(cache_key, result, ttl=86400)
-                logger.debug(f"地理热力图缓存已设置: {cache_key}")
-
+            logger.info(f"地理热力图查询完成: {len(provinces)} 省份")
             return result
         except Exception as e:
             logger.error(f"地理热力图查询失败: {e}")
@@ -531,15 +398,13 @@ class StatsAggregationService:
     @staticmethod
     def clear_cache_by_chat_id(chat_id: int) -> int:
         """
-        清除指定群组的所有缓存
+        缓存清除端点（已弃用，系统不再使用 Redis 缓存）
 
         Args:
             chat_id: 群组ID
 
         Returns:
-            int: 清除的缓存数量
+            int: 总是返回 0（兼容性）
         """
-        pattern = f'*{chat_id}*'
-        count = CacheService.clear_pattern(pattern)
-        logger.info(f"清除群组 {chat_id} 的缓存: {count} 条")
-        return count
+        logger.info(f"缓存清除请求（已弃用）: chat_id={chat_id}, 系统不再使用 Redis 缓存")
+        return 0

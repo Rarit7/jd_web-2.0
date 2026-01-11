@@ -5,6 +5,7 @@
 import {
   apiGetTransactionMethods,
   apiGetDarkKeywordsAnalysis,
+  apiGetDarkKeywordsWordCloud,
   apiGetPriceTrend,
   apiGetGeoHeatmap
 } from './adAnalysis'
@@ -77,11 +78,12 @@ export async function fetchDashboardData(
     const results = await Promise.allSettled([
       apiGetTransactionMethods(queryParams),
       apiGetDarkKeywordsAnalysis(queryParams),
+      apiGetDarkKeywordsWordCloud(queryParams),
       apiGetPriceTrend(queryParams),
       apiGetGeoHeatmap(queryParams)
     ])
 
-    const [transactionResult, darkKeywordsResult, priceResult, geoResult] = results
+    const [transactionResult, darkKeywordsResult, wordCloudResult, priceResult, geoResult] = results
 
     // 处理交易方式数据
     let transactionMethods: TransactionMethodData[] | null = null
@@ -94,28 +96,14 @@ export async function fetchDashboardData(
       console.error('[DashboardApi] 交易方式数据加载失败:', transactionError)
     }
 
-    // 处理黑词数据（从 table 中聚合关键词词频，用于词云）
+    // 处理黑词数据（使用专用词云 API 获取所有关键词）
     let darkKeywords: Array<{ name: string; value: number }> | null = null
     let darkKeywordsTrend: { months: string[]; data: Record<string, number[]> } | null = null
     let darkKeywordsError: Error | null = null
+
+    // 从 darkKeywordsResult 获取趋势数据
     if (darkKeywordsResult.status === 'fulfilled') {
       const payload = darkKeywordsResult.value.payload
-
-      // 提取词云数据（从 table 中聚合关键词词频）
-      const tableData = payload?.table || []
-      const keywordMap = new Map<string, number>()
-      tableData.forEach((record: any) => {
-        const keyword = record.keyword || ''
-        const count = record.count || 0
-        if (keyword) {
-          keywordMap.set(keyword, (keywordMap.get(keyword) || 0) + count)
-        }
-      })
-      // 转换为数组并按词频降序排序，取前 50 个
-      darkKeywords = Array.from(keywordMap.entries())
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 50)
 
       // 提取趋势数据（line 字段）
       if (payload?.line && payload.line.months && payload.line.data) {
@@ -123,15 +111,22 @@ export async function fetchDashboardData(
           months: payload.line.months,
           data: payload.line.data
         }
-      }
-
-      console.log('[DashboardApi] 黑词数据加载成功:', darkKeywords.length, '个关键词')
-      if (darkKeywordsTrend) {
         console.log('[DashboardApi] 黑词趋势数据加载成功')
       }
     } else {
       darkKeywordsError = darkKeywordsResult.reason
-      console.error('[DashboardApi] 黑词数据加载失败:', darkKeywordsError)
+      console.error('[DashboardApi] 黑词趋势数据加载失败:', darkKeywordsError)
+    }
+
+    // 从 wordCloudResult 获取词云数据（包含所有触发过的关键词）
+    if (wordCloudResult.status === 'fulfilled') {
+      const wordCloudPayload = wordCloudResult.value.payload
+      // 词云 API 直接返回所有关键词，取前 50 个用于展示
+      darkKeywords = (Array.isArray(wordCloudPayload) ? wordCloudPayload : []).slice(0, 50)
+      console.log('[DashboardApi] 词云数据加载成功:', darkKeywords.length, '个关键词（总共', wordCloudPayload?.length || 0, '个）')
+    } else {
+      console.warn('[DashboardApi] 词云数据加载失败，将使用空数组:', wordCloudResult.reason)
+      darkKeywords = []
     }
 
     // 处理价格趋势数据

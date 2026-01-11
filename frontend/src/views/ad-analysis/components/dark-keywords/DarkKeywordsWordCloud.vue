@@ -30,10 +30,22 @@ const props = withDefaults(defineProps<Props>(), {
 const chartRef = ref()
 let chartInstance: any = null
 
-// 词云颜色配置
+// 词云颜色配置 - 专业渐变色配置
 const colors = [
-  '#4c60ff', '#27d08a', '#2db7f5', '#f50', '#fa541c',
-  '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#52c41a'
+  // 蓝色系
+  '#4c60ff', '#5a7aff', '#1890ff', '#0050b3', '#0037a6',
+  // 绿色系
+  '#27d08a', '#52c41a', '#13c2c2', '#1890ff', '#52a836',
+  // 紫色系
+  '#722ed1', '#b37feb', '#9254de', '#d946ef', '#a855f7',
+  // 红色/橙色系
+  '#fa541c', '#f5222d', '#ff4d4f', '#ff7a45', '#ffa940',
+  // 黄色系
+  '#faad14', '#ffc53d', '#fadb14', '#eac855',
+  // 粉色系
+  '#eb2f96', '#f759ab', '#ff1493', '#ff69b4',
+  // 青色系
+  '#13c2c2', '#36cfc9', '#5cdbd3', '#87e8de'
 ]
 
 function initChart() {
@@ -46,31 +58,47 @@ function initChart() {
 function updateChart() {
   if (!chartInstance || !props.data || props.data.length === 0) return
 
+  // 计算最大最小值用于字体大小映射
+  const values = props.data.map(item => item.value)
+  const maxValue = Math.max(...values)
+  const minValue = Math.min(...values)
+
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
       show: true,
-      formatter: (params: any) => `${params.name}: ${params.value}次`
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      borderColor: '#4c60ff',
+      textStyle: {
+        color: '#fff',
+        fontSize: 12
+      },
+      formatter: (params: any) => {
+        const percentage = ((params.value / maxValue) * 100).toFixed(1)
+        return `<strong>${params.name}</strong><br/>触发频率: ${params.value}次<br/>占比: ${percentage}%`
+      }
     },
     series: [{
       type: 'wordCloud',
-      gridSize: 4,
-      sizeRange: [14, 60],
+      gridSize: 3,
+      sizeRange: [16, 72],
       rotationRange: [0, 0],
       shape: 'circle',
       width: '100%',
       height: '100%',
       drawOutOfBound: false,
       textStyle: {
-        fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+        fontFamily: 'Arial, "Microsoft YaHei", "PingFang SC", sans-serif',
         fontWeight: 'bold',
         color: () => colors[Math.floor(Math.random() * colors.length)]
       },
       emphasis: {
         focus: 'self',
         textStyle: {
-          shadowBlur: 10,
-          shadowColor: '#333'
+          shadowBlur: 15,
+          shadowColor: 'rgba(76, 96, 255, 0.5)',
+          shadowOffsetX: 0,
+          shadowOffsetY: 0
         }
       },
       data: props.data.map(item => ({

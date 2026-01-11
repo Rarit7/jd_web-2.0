@@ -16,6 +16,7 @@ from jd.tasks.ad_analysis_extraction import (
     process_messages_for_chat,
     process_all_chats
 )
+from jd.tasks.ad_analysis_daily_stats import compute_ad_analysis_daily_stats
 from celery.result import AsyncResult
 
 logger = logging.getLogger(__name__)
@@ -470,100 +471,57 @@ def get_ad_analysis_task_status(task_id):
 @api.route('/ad-tracking/ad-analysis/cache/clear', methods=['POST'], need_login=False)
 def clear_analysis_cache():
     """
-    清除分析缓存
+    手动触发统计数据生成任务
 
-    当数据处理完成后，强制清除相关缓存以确保显示最新数据
+    系统已从 Redis 缓存迁移到 MySQL 统计表。
+    此端点现已改为手动触发每日统计任务，以重新生成统计数据。
 
     Request Body:
         {
-            "chat_id": "123456"  # 可选，不提供则清除全局缓存
+            "chat_id": "123456"  # 可选（已忽略，任务处理全局数据）
         }
 
     Returns:
         {
-            "message": "缓存已清除",
-            "cleared_keys": ["key1", "key2", ...]
+            "message": "统计任务已触发，系统后台处理中",
+            "task_id": "celery_task_id",
+            "note": "任务通常在几秒钟内完成"
         }
     """
     try:
-        from jd.services.cache_service import CacheService
-
         data = request.get_json() or {}
         chat_id = data.get('chat_id')
 
-        cleared_keys = []
+        logger.info(f"手动触发统计任务: chat_id={chat_id}")
 
-        # 清除交易方式缓存
-        if chat_id:
-            transaction_pattern = f'transaction_methods:{chat_id}:*'
-            count = CacheService.clear_pattern(transaction_pattern)
-            if count > 0:
-                cleared_keys.append(f'{transaction_pattern} ({count}条)')
-        else:
-            # 清除所有交易方式缓存
-            count = CacheService.clear_pattern('transaction_methods:*')
-            if count > 0:
-                cleared_keys.append(f'transaction_methods:* ({count}条)')
+        # 提交 Celery 任务（不指定日期，使用默认的昨天）
+        try:
+            task = compute_ad_analysis_daily_stats.apply_async()
+            task_id = task.id
 
-        # 清除地理位置热力图缓存
-        if chat_id:
-            geo_pattern = f'geo_heatmap:{chat_id}:*'
-            count = CacheService.clear_pattern(geo_pattern)
-            if count > 0:
-                cleared_keys.append(f'{geo_pattern} ({count}条)')
-        else:
-            count = CacheService.clear_pattern('geo_heatmap:*')
-            if count > 0:
-                cleared_keys.append(f'geo_heatmap:* ({count}条)')
+            logger.info(f"统计任务已提交: task_id={task_id}")
 
-        # 清除价格趋势缓存
-        if chat_id:
-            price_pattern = f'price_trend:{chat_id}:*'
-            count = CacheService.clear_pattern(price_pattern)
-            if count > 0:
-                cleared_keys.append(f'{price_pattern} ({count}条)')
-        else:
-            count = CacheService.clear_pattern('price_trend:*')
-            if count > 0:
-                cleared_keys.append(f'price_trend:* ({count}条)')
+            return api_response({
+                'message': '统计任务已触发，系统后台处理中。任务通常在几秒钟内完成。',
+                'task_id': task_id,
+                'note': '系统会重新计算黑词、交易方式、价格和地理位置的统计数据。'
+            })
 
-        # 清除黑词分析缓存
-        if chat_id:
-            dark_pattern = f'dark_keywords:{chat_id}:*'
-            count = CacheService.clear_pattern(dark_pattern)
-            if count > 0:
-                cleared_keys.append(f'{dark_pattern} ({count}条)')
-        else:
-            count = CacheService.clear_pattern('dark_keywords:*')
-            if count > 0:
-                cleared_keys.append(f'dark_keywords:* ({count}条)')
-
-        # 同时也清除全局缓存（chat_id 为 None 的情况）
-        if chat_id:
-            for pattern in [
-                'transaction_methods:None:*',
-                'geo_heatmap:None:*',
-                'price_trend:None:*',
-                'dark_keywords:None:*'
-            ]:
-                count = CacheService.clear_pattern(pattern)
-                if count > 0:
-                    cleared_keys.append(f'{pattern} ({count}条)')
-
-        logger.info(f"清除分析缓存: chat_id={chat_id}, 清除的键={cleared_keys}")
-
-        return api_response({
-            'message': '缓存已清除',
-            'cleared_count': len(cleared_keys),
-            'cleared_keys': cleared_keys
-        })
+        except Exception as task_error:
+            logger.error(f"提交统计任务失败: {task_error}", exc_info=True)
+            return api_response(
+                {},
+                err_code=3,
+                err_msg=f'提交统计任务失败: {str(task_error)}',
+                status_code=500
+            )
 
     except Exception as e:
-        logger.error(f"清除缓存失败: {e}", exc_info=True)
+        logger.error(f"手动触发统计请求处理失败: {e}", exc_info=True)
         return api_response(
             {},
             err_code=99,
-            err_msg='清除缓存失败',
+            err_msg='请求处理失败',
             status_code=500
         )
 

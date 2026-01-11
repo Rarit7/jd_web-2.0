@@ -12,7 +12,8 @@ from jd import db
 from jd.views.api import api
 from jd.helpers.response import api_response
 from jd.services.stats_aggregation_service import StatsAggregationService
-from jd.services.cache_service import CacheService
+# CacheService 已不再使用（系统迁移到 MySQL 统计表）
+# from jd.services.cache_service import CacheService
 from jd.models.ad_tracking_price import AdTrackingPrice
 from jd.models.ad_tracking_geo_location import AdTrackingGeoLocation
 from jd.models.ad_tracking_dark_keyword import AdTrackingDarkKeyword
@@ -109,6 +110,105 @@ def get_dark_keywords_analysis():
         )
 
 
+@api.route('/ad-tracking/ad-analysis/dark-keywords/word-cloud', methods=['GET'], need_login=False)
+def get_dark_keywords_word_cloud():
+    """
+    获取黑词词云数据（所有触发过的关键词）
+
+    Query Parameters:
+        - chat_id: 群组ID (可选，不提供时统计全表)
+        - tag_ids: 标签ID列表 (可选)
+        - keyword: 搜索关键词 (可选，用于过滤)
+        - category: 分类ID (可选，用于过滤)
+        - drug: 毒品ID (可选，用于过滤)
+        - days: 天数范围 (默认365)
+
+    Returns:
+        {
+            "err_code": 0,
+            "payload": [
+                {"name": "D", "value": 7206},
+                {"name": "粉", "value": 3592},
+                ...
+            ]
+        }
+    """
+    try:
+        from sqlalchemy import func
+        from datetime import datetime, timedelta
+
+        chat_id = request.args.get('chat_id', type=int)
+        tag_ids = request.args.getlist('tag_ids', type=int)
+        keyword = request.args.get('keyword')
+        category = request.args.get('category', type=int)
+        drug = request.args.get('drug', type=int)
+        days = request.args.get('days', 365, type=int)
+
+        if days < 1 or days > 3650:
+            return api_response(
+                {},
+                err_code=2,
+                err_msg='days 参数必须在 1-3650 之间',
+                status_code=400
+            )
+
+        # 计算起始日期
+        start_date = datetime.now().date() - timedelta(days=days)
+
+        # 构建查询
+        query = db.session.query(
+            AdTrackingDarkKeyword.keyword,
+            func.sum(AdTrackingDarkKeyword.count).label('total_count')
+        ).filter(
+            AdTrackingDarkKeyword.msg_date >= start_date
+        )
+
+        # 按条件过滤
+        if chat_id:
+            query = query.filter(AdTrackingDarkKeyword.chat_id == str(chat_id))
+
+        if keyword:
+            query = query.filter(AdTrackingDarkKeyword.keyword.like(f'%{keyword}%'))
+
+        if category:
+            query = query.filter(AdTrackingDarkKeyword.category_id == category)
+
+        if drug:
+            query = query.filter(AdTrackingDarkKeyword.drug_id == drug)
+
+        # 分组统计并排序
+        results = query.group_by(
+            AdTrackingDarkKeyword.keyword
+        ).order_by(
+            func.sum(AdTrackingDarkKeyword.count).desc()
+        ).all()
+
+        # 转换为词云格式
+        word_cloud_data = [
+            {'name': kw, 'value': int(count)}
+            for kw, count in results
+        ]
+
+        return api_response(word_cloud_data)
+
+    except ValueError as e:
+        logger.warning(f"参数验证失败: {e}")
+        return api_response(
+            [],
+            err_code=2,
+            err_msg=f'参数错误: {str(e)}',
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"获取黑词词云数据失败: {e}", exc_info=True)
+        return api_response(
+            [],
+            err_code=99,
+            err_msg='服务器内部错误',
+            status_code=500
+        )
+
+
 @api.route('/ad-tracking/ad-analysis/dark-keywords/categories', methods=['GET'], need_login=False)
 def get_dark_keywords_categories():
     """
@@ -175,26 +275,8 @@ def delete_dark_keyword(keyword_id):
         db.session.delete(keyword)
         db.session.commit()
 
-        # 清除相关缓存（包括特定群组缓存和全局缓存）
-        try:
-            # 清除特定群组的缓存
-            if keyword.chat_id:
-                try:
-                    chat_id = int(keyword.chat_id)
-                    count = CacheService.clear_pattern(f'dark_keywords:{chat_id}:*')
-                    if count > 0:
-                        logger.info(f"清除群组 {chat_id} 的黑词缓存: {count} 条")
-                except (ValueError, TypeError):
-                    pass
-
-            # 同时清除全局缓存（因为全表统计数据也受影响）
-            global_count = CacheService.clear_pattern('dark_keywords:all:*')
-            if global_count > 0:
-                logger.info(f"清除全局黑词缓存: {global_count} 条")
-
-        except Exception as cache_error:
-            logger.warning(f"清除缓存失败: {cache_error}")
-            # 不影响删除操作的成功
+        # 注意：系统已迁移到 MySQL 统计表，无需清除 Redis 缓存
+        # 统计数据将在下一次定时任务中自动重新计算
 
         logger.info(f"删除黑词记录: id={keyword_id}, keyword={keyword.keyword}")
 

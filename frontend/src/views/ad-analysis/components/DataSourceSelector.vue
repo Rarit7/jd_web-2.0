@@ -98,13 +98,13 @@
               {{ submitting ? '数据处理中...' : '开始数据处理' }}
             </el-button>
             <el-button
-              type="danger"
-              @click="handleClearCache"
-              :loading="clearingCache"
+              type="warning"
+              @click="handleTriggerDailyStats"
+              :loading="generatingStats"
               plain
             >
-              <el-icon><Delete /></el-icon>
-              {{ clearingCache ? '清空中...' : '清空缓存' }}
+              <el-icon><VideoPlay /></el-icon>
+              {{ generatingStats ? '生成中...' : '手动生成统计' }}
             </el-button>
             <el-button @click="resetForm">
               重置
@@ -138,7 +138,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, VideoPlay, Delete } from '@element-plus/icons-vue'
+import { Download, VideoPlay } from '@element-plus/icons-vue'
 import adTrackingApi from '@/api/adTracking'
 import { apiClearAnalysisCache } from '@/api/adAnalysis'
 import { useAdAnalysisStore } from '@/store/modules/adAnalysis'
@@ -148,7 +148,7 @@ import type { AdTrackingChannel } from '@/types/adTracking'
 // ==================== 响应式状态 ====================
 const loadingChannels = ref(false)
 const submitting = ref(false)
-const clearingCache = ref(false)
+const generatingStats = ref(false)
 const channels = ref<AdTrackingChannel[]>([])
 const searchedChannels = ref<AdTrackingChannel[]>([])
 const channelSearchKeyword = ref('')
@@ -306,13 +306,13 @@ const resetForm = () => {
 }
 
 /**
- * 手动清空Redis缓存
+ * 手动触发每日统计任务
  */
-const handleClearCache = async () => {
+const handleTriggerDailyStats = async () => {
   try {
     await ElMessageBox.confirm(
-      '确定要清空Redis缓存吗？清空后系统将重新计算统计数据，首次加载可能会稍慢。',
-      '清空缓存确认',
+      '这将手动触发统计数据生成任务。系统会重新计算黑词、交易方式、价格和地理位置的统计数据，请确认是否继续？',
+      '生成统计确认',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
@@ -320,18 +320,18 @@ const handleClearCache = async () => {
       }
     )
 
-    clearingCache.value = true
+    generatingStats.value = true
     const response = await apiClearAnalysisCache(selectorForm.value.chat_id || undefined)
-    const clearedCount = response.payload?.cleared_count || 0
+    const message = response.payload?.message || '统计任务已触发'
 
-    ElMessage.success(`缓存已清空，共清除 ${clearedCount} 条缓存记录`)
+    ElMessage.success(message)
   } catch (error: any) {
     if (error !== 'cancel') {
-      console.error('清空缓存失败:', error)
-      ElMessage.error(error?.message || '清空缓存失败，请重试')
+      console.error('触发统计任务失败:', error)
+      ElMessage.error(error?.message || '触发统计任务失败，请重试')
     }
   } finally {
-    clearingCache.value = false
+    generatingStats.value = false
   }
 }
 
@@ -341,16 +341,6 @@ const handleClearCache = async () => {
 const handleProcessingCompleted = async () => {
   ElMessage.success('数据处理完成！')
   showProcessingDialog.value = false
-
-  // 清除缓存以确保显示最新数据
-  try {
-    const chatId = selectorForm.value.chat_id
-    const response = await apiClearAnalysisCache(chatId || undefined)
-    console.log('缓存已清除:', response.payload?.cleared_count, '条')
-  } catch (error) {
-    console.error('清除缓存失败:', error)
-    // 清除缓存失败不影响数据处理成功的提示
-  }
 
   // 重置表单
   resetForm()

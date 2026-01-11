@@ -1,106 +1,220 @@
 <template>
   <div class="dark-keyword-management">
-    <!-- 三级展开表格 -->
-    <el-table
-      :data="categories"
-      v-loading="loading"
-      row-key="id"
-      :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
-      default-expand-all
-      border
-      stripe
-    >
-      <el-table-column prop="name" label="名称" min-width="200">
-        <template #default="{ row }">
-          <span v-if="row.__type === 'category'" class="category-name">
-            {{ row.display_name || row.name }}
-          </span>
-          <span v-else-if="row.__type === 'drug'" class="drug-name">
-            {{ row.display_name || row.name }}
-          </span>
-          <span v-else class="keyword-name">
-            {{ row.keyword }}
-          </span>
-          <el-tag v-if="!row.is_active" type="info" size="small" style="margin-left: 8px">
-            已禁用
-          </el-tag>
-        </template>
-      </el-table-column>
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <span>黑词管理</span>
+          <el-button type="primary" @click="showAddCategoryDialog = true">添加分类</el-button>
+        </div>
+      </template>
 
-      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+      <div v-loading="loading" class="content">
+        <!-- 分类表 -->
+        <el-table
+          :data="categories"
+          style="width: 100%"
+          stripe
+          @row-click="handleCategoryRowClick"
+          :row-class-name="() => 'clickable-row'"
+        >
+          <!-- 分类名称 -->
+          <el-table-column prop="name" label="分类" width="200">
+            <template #default="{ row }">
+              <div class="category-badge">
+                <span class="category-name">{{ row.display_name || row.name }}</span>
+                <el-tag v-if="!row.is_active" type="info" size="small">已禁用</el-tag>
+              </div>
+            </template>
+          </el-table-column>
 
-      <el-table-column prop="priority" label="优先级" width="100" align="center">
-        <template #default="{ row }">
-          <span v-if="row.__type === 'keyword'">{{ row.weight }}</span>
-          <span v-else>{{ row.priority }}</span>
-        </template>
-      </el-table-column>
+          <!-- 毒品数量 -->
+          <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
 
-      <el-table-column label="操作" width="280" align="center">
-        <template #default="{ row }">
-          <!-- 分类操作 -->
-          <template v-if="row.__type === 'category'">
-            <el-button size="small" @click="handleEditCategory(row)">编辑</el-button>
-            <el-button size="small" type="primary" @click="handleAddDrug(row)">添加毒品</el-button>
-            <el-button
-              size="small"
-              type="danger"
-              :disabled="row.children && row.children.length > 0"
-              @click="handleDeleteCategory(row.id)"
+          <el-table-column label="毒品数量" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag effect="light" type="info">
+                {{ row.drugsCount || 0 }} 个
+              </el-tag>
+            </template>
+          </el-table-column>
+
+          <!-- 优先级 -->
+          <el-table-column prop="priority" label="优先级" width="100" align="center" />
+
+          <!-- 操作 -->
+          <el-table-column label="操作" width="200" align="center">
+            <template #default="{ row }">
+              <div class="action-buttons">
+                <el-button size="small" type="primary" @click.stop="editCategory(row)">
+                  编辑
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  :disabled="row.drugsCount > 0"
+                  @click.stop="deleteCategory(row.id)"
+                >
+                  删除
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
+
+          <!-- 状态切换 -->
+          <el-table-column label="状态" width="100" align="center">
+            <template #default="{ row }">
+              <el-switch v-model="row.is_active" @change="handleCategoryStatusChange(row)" />
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 分类展开面板 -->
+        <el-collapse-transition>
+          <div v-if="expandedCategoryId" class="detail-panel">
+            <!-- 毒品列表 -->
+            <div class="panel-header">
+              <h3>
+                <span>毒品管理 - </span>
+                <span class="category-title">{{ expandedCategory?.display_name || expandedCategory?.name }}</span>
+              </h3>
+              <div class="panel-actions">
+                <el-button type="primary" size="small" @click="showAddDrugDialog = true">
+                  添加毒品
+                </el-button>
+                <el-button size="small" @click="expandedCategoryId = null">
+                  收起
+                </el-button>
+              </div>
+            </div>
+
+            <el-table
+              :data="expandedCategory?.drugs || []"
+              style="width: 100%; margin-top: 16px"
+              stripe
+              @row-click="handleDrugRowClick"
+              :row-class-name="() => 'clickable-row nested-row'"
             >
-              删除
-            </el-button>
-          </template>
+              <!-- 毒品名称 -->
+              <el-table-column prop="name" label="毒品" width="200">
+                <template #default="{ row }">
+                  <div class="drug-badge">
+                    <span class="drug-name">{{ row.display_name || row.name }}</span>
+                    <el-tag v-if="!row.is_active" type="info" size="small">已禁用</el-tag>
+                  </div>
+                </template>
+              </el-table-column>
 
-          <!-- 毒品操作 -->
-          <template v-else-if="row.__type === 'drug'">
-            <el-button size="small" @click="handleEditDrug(row)">编辑</el-button>
-            <el-button size="small" type="primary" @click="handleAddKeyword(row)">添加关键词</el-button>
-            <el-button
-              size="small"
-              type="danger"
-              :disabled="row.children && row.children.length > 0"
-              @click="handleDeleteDrug(row.id)"
-            >
-              删除
-            </el-button>
-          </template>
+              <!-- 描述 -->
+              <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
 
-          <!-- 关键词操作 -->
-          <template v-else-if="row.__type === 'keyword'">
-            <el-button size="small" @click="handleEditKeyword(row)">编辑</el-button>
-            <el-button
-              size="small"
-              type="danger"
-              @click="handleDeleteKeyword(row.id)"
-            >
-              删除
-            </el-button>
-          </template>
-        </template>
-      </el-table-column>
+              <!-- 关键词数量 -->
+              <el-table-column label="关键词数" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag effect="light" type="success">
+                    {{ row.keywordsCount || 0 }} 个
+                  </el-tag>
+                </template>
+              </el-table-column>
 
-      <el-table-column label="状态" width="100" align="center">
-        <template #default="{ row }">
-          <el-switch
-            v-model="row.is_active"
-            @change="handleToggleStatus(row)"
-          />
-        </template>
-      </el-table-column>
-    </el-table>
+              <!-- 优先级 -->
+              <el-table-column prop="priority" label="优先级" width="100" align="center" />
 
-    <!-- 添加分类按钮 -->
-    <div class="add-category-btn">
-      <el-button type="primary" @click="handleAddCategory">
-        添加分类
-      </el-button>
-    </div>
+              <!-- 操作 -->
+              <el-table-column label="操作" width="200" align="center">
+                <template #default="{ row }">
+                  <div class="action-buttons">
+                    <el-button size="small" type="primary" @click.stop="editDrug(row)">
+                      编辑
+                    </el-button>
+                    <el-button
+                      size="small"
+                      type="danger"
+                      :disabled="row.keywordsCount > 0"
+                      @click.stop="deleteDrug(row.id)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
 
-    <!-- 分类编辑对话框 -->
+              <!-- 状态 -->
+              <el-table-column label="状态" width="100" align="center">
+                <template #default="{ row }">
+                  <el-switch v-model="row.is_active" @change="handleDrugStatusChange(row)" />
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 关键词展开面板 -->
+            <el-collapse-transition>
+              <div v-if="expandedDrugId && expandedDrug" class="detail-panel nested-panel">
+                <div class="panel-header">
+                  <h3>
+                    <span>关键词管理 - </span>
+                    <span class="drug-title">{{ expandedDrug.display_name || expandedDrug.name }}</span>
+                  </h3>
+                  <div class="panel-actions">
+                    <el-button type="primary" size="small" @click="showAddKeywordDialog = true">
+                      添加关键词
+                    </el-button>
+                    <el-button size="small" @click="expandedDrugId = null">
+                      收起
+                    </el-button>
+                  </div>
+                </div>
+
+                <div class="keywords-panel">
+                  <template v-if="expandedDrug.keywords && expandedDrug.keywords.length > 0">
+                    <div class="keywords-list">
+                      <div
+                        v-for="kw in expandedDrug.keywords"
+                        :key="kw.id"
+                        class="keyword-item"
+                      >
+                        <div class="keyword-chip">
+                          <span class="keyword-text">{{ kw.keyword }}</span>
+                          <span class="keyword-weight">权重: {{ kw.weight }}</span>
+                        </div>
+                        <div class="keyword-actions">
+                          <el-switch
+                            v-model="kw.is_active"
+                            @change="handleKeywordStatusChange(kw)"
+                            size="small"
+                          />
+                          <el-button
+                            size="small"
+                            type="primary"
+                            text
+                            @click="editKeyword(kw)"
+                          >
+                            编辑
+                          </el-button>
+                          <el-button
+                            size="small"
+                            type="danger"
+                            text
+                            @click="deleteKeyword(kw.id)"
+                          >
+                            删除
+                          </el-button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <el-empty v-else description="暂无关键词" />
+                </div>
+              </div>
+            </el-collapse-transition>
+          </div>
+        </el-collapse-transition>
+      </div>
+    </el-card>
+
+    <!-- 分类对话框 -->
     <el-dialog
-      v-model="categoryDialogVisible"
-      :title="categoryForm.id ? '编辑分类' : '添加分类'"
+      v-model="showAddCategoryDialog"
+      :title="editingCategory ? '编辑分类' : '添加分类'"
       width="500px"
     >
       <el-form :model="categoryForm" label-width="100px">
@@ -123,15 +237,15 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="categoryDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveCategory">确定</el-button>
+        <el-button @click="showAddCategoryDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveCategory">确定</el-button>
       </template>
     </el-dialog>
 
-    <!-- 毒品编辑对话框 -->
+    <!-- 毒品对话框 -->
     <el-dialog
-      v-model="drugDialogVisible"
-      :title="drugForm.id ? '编辑毒品' : '添加毒品'"
+      v-model="showAddDrugDialog"
+      :title="editingDrug ? '编辑毒品' : '添加毒品'"
       width="500px"
     >
       <el-form :model="drugForm" label-width="100px">
@@ -154,15 +268,15 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="drugDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveDrug">确定</el-button>
+        <el-button @click="showAddDrugDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveDrug">确定</el-button>
       </template>
     </el-dialog>
 
-    <!-- 关键词编辑对话框 -->
+    <!-- 关键词对话框 -->
     <el-dialog
-      v-model="keywordDialogVisible"
-      :title="keywordForm.id ? '编辑关键词' : '添加关键词'"
+      v-model="showAddKeywordDialog"
+      :title="editingKeyword ? '编辑关键词' : '添加关键词'"
       width="500px"
     >
       <el-form :model="keywordForm" label-width="100px">
@@ -174,15 +288,15 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="keywordDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveKeyword">确定</el-button>
+        <el-button @click="showAddKeywordDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveKeyword">确定</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   apiGetDarkKeywordCategoriesConfig,
@@ -205,7 +319,6 @@ interface Keyword {
   keyword: string
   weight: number
   is_active: boolean
-  __type: 'keyword'
 }
 
 interface Drug {
@@ -216,8 +329,8 @@ interface Drug {
   description?: string
   priority: number
   is_active: boolean
-  children?: Keyword[]
-  __type: 'drug'
+  keywords?: Keyword[]
+  keywordsCount: number
 }
 
 interface Category {
@@ -227,45 +340,60 @@ interface Category {
   description?: string
   priority: number
   is_active: boolean
-  children?: Drug[]
-  __type: 'category'
+  drugs?: Drug[]
+  drugsCount: number
 }
 
 // 状态
 const loading = ref(false)
 const categories = ref<Category[]>([])
+const expandedCategoryId = ref<number | null>(null)
+const expandedDrugId = ref<number | null>(null)
+
+// 对话框
+const showAddCategoryDialog = ref(false)
+const showAddDrugDialog = ref(false)
+const showAddKeywordDialog = ref(false)
+
+// 编辑状态标记
+const editingCategory = ref(false)
+const editingDrug = ref(false)
+const editingKeyword = ref(false)
 
 // 分类表单
-const categoryDialogVisible = ref(false)
 const categoryForm = ref({
   id: null as number | null,
   name: '',
   display_name: '',
   description: '',
-  priority: 0,
-  is_active: true
+  priority: 0
 })
 
 // 毒品表单
-const drugDialogVisible = ref(false)
 const drugForm = ref({
   id: null as number | null,
   category_id: null as number | null,
   name: '',
   display_name: '',
   description: '',
-  priority: 0,
-  is_active: true
+  priority: 0
 })
 
 // 关键词表单
-const keywordDialogVisible = ref(false)
 const keywordForm = ref({
   id: null as number | null,
   drug_id: null as number | null,
   keyword: '',
-  weight: 1,
-  is_active: true
+  weight: 1
+})
+
+// 计算属性
+const expandedCategory = computed(() => {
+  return categories.value.find(c => c.id === expandedCategoryId.value)
+})
+
+const expandedDrug = computed(() => {
+  return expandedCategory.value?.drugs?.find(d => d.id === expandedDrugId.value)
 })
 
 // 加载数据
@@ -275,24 +403,19 @@ async function loadData() {
     const response = await apiGetDarkKeywordCategoriesConfig()
     const result = response.payload.categories
 
-    // 为每个分类加载毒品和关键词
     for (const category of result) {
-      category.__type = 'category' as const
       const drugsResponse = await apiGetDarkKeywordDrugs({ category_id: category.id })
-      const drugs = drugsResponse.payload.drugs
+      const drugs = drugsResponse.payload.drugs || []
 
       for (const drug of drugs) {
-        drug.__type = 'drug' as const
         const keywordsResponse = await apiGetDarkKeywordsByDrug(drug.id)
-        const keywords = keywordsResponse.payload.keywords.map((kw: any) => ({
-          ...kw,
-          __type: 'keyword' as const
-        }))
-        // 使用 children 作为子节点属性名
-        drug.children = keywords
+        const keywords = keywordsResponse.payload.keywords || []
+        drug.keywords = keywords
+        drug.keywordsCount = keywords.length
       }
-      // 使用 children 作为子节点属性名
-      category.children = drugs
+
+      category.drugs = drugs
+      category.drugsCount = drugs.length
     }
 
     categories.value = result
@@ -304,32 +427,39 @@ async function loadData() {
   }
 }
 
-// 分类操作
-function handleAddCategory() {
-  categoryForm.value = {
-    id: null,
-    name: '',
-    display_name: '',
-    description: '',
-    priority: 0,
-    is_active: true
+// 行点击处理
+function handleCategoryRowClick(row: Category) {
+  if (expandedCategoryId.value === row.id) {
+    expandedCategoryId.value = null
+    expandedDrugId.value = null
+  } else {
+    expandedCategoryId.value = row.id
+    expandedDrugId.value = null
   }
-  categoryDialogVisible.value = true
 }
 
-function handleEditCategory(row: Category) {
+function handleDrugRowClick(row: Drug) {
+  if (expandedDrugId.value === row.id) {
+    expandedDrugId.value = null
+  } else {
+    expandedDrugId.value = row.id
+  }
+}
+
+// 分类操作
+function editCategory(row: Category) {
+  editingCategory.value = true
   categoryForm.value = {
     id: row.id,
     name: row.name,
     display_name: row.display_name || '',
     description: row.description || '',
-    priority: row.priority,
-    is_active: row.is_active
+    priority: row.priority
   }
-  categoryDialogVisible.value = true
+  showAddCategoryDialog.value = true
 }
 
-async function handleSaveCategory() {
+async function saveCategory() {
   if (!categoryForm.value.name.trim()) {
     ElMessage.warning('请输入分类名称')
     return
@@ -337,24 +467,28 @@ async function handleSaveCategory() {
 
   try {
     if (categoryForm.value.id) {
-      await apiUpdateDarkKeywordCategory(categoryForm.value.id, categoryForm.value)
+      await apiUpdateDarkKeywordCategory(categoryForm.value.id, {
+        display_name: categoryForm.value.display_name,
+        description: categoryForm.value.description,
+        priority: categoryForm.value.priority
+      })
       ElMessage.success('更新成功')
     } else {
       await apiCreateDarkKeywordCategory(categoryForm.value)
       ElMessage.success('添加成功')
     }
-    categoryDialogVisible.value = false
+    showAddCategoryDialog.value = false
+    editingCategory.value = false
+    resetCategoryForm()
     loadData()
   } catch (error: any) {
     ElMessage.error(error.message || '操作失败')
   }
 }
 
-async function handleDeleteCategory(id: number) {
+async function deleteCategory(id: number) {
   try {
-    await ElMessageBox.confirm('确定要删除该分类吗？删除后无法恢复！', '警告', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm('确定要删除该分类吗？', '警告', { type: 'warning' })
     await apiDeleteDarkKeywordCategory(id)
     ElMessage.success('删除成功')
     loadData()
@@ -365,34 +499,41 @@ async function handleDeleteCategory(id: number) {
   }
 }
 
-// 毒品操作
-function handleAddDrug(row: Category) {
-  drugForm.value = {
+async function handleCategoryStatusChange(row: Category) {
+  try {
+    await apiUpdateDarkKeywordCategory(row.id, { is_active: row.is_active })
+    ElMessage.success('状态更新成功')
+  } catch (error: any) {
+    row.is_active = !row.is_active
+    ElMessage.error(error.message || '状态更新失败')
+  }
+}
+
+function resetCategoryForm() {
+  categoryForm.value = {
     id: null,
-    category_id: row.id,
     name: '',
     display_name: '',
     description: '',
-    priority: 0,
-    is_active: true
+    priority: 0
   }
-  drugDialogVisible.value = true
 }
 
-function handleEditDrug(row: Drug) {
+// 毒品操作
+function editDrug(row: Drug) {
+  editingDrug.value = true
   drugForm.value = {
     id: row.id,
     category_id: row.category_id,
     name: row.name,
     display_name: row.display_name || '',
     description: row.description || '',
-    priority: row.priority,
-    is_active: row.is_active
+    priority: row.priority
   }
-  drugDialogVisible.value = true
+  showAddDrugDialog.value = true
 }
 
-async function handleSaveDrug() {
+async function saveDrug() {
   if (!drugForm.value.name.trim()) {
     ElMessage.warning('请输入毒品名称')
     return
@@ -400,24 +541,34 @@ async function handleSaveDrug() {
 
   try {
     if (drugForm.value.id) {
-      await apiUpdateDarkKeywordDrug(drugForm.value.id, drugForm.value)
+      await apiUpdateDarkKeywordDrug(drugForm.value.id, {
+        display_name: drugForm.value.display_name,
+        description: drugForm.value.description,
+        priority: drugForm.value.priority
+      })
       ElMessage.success('更新成功')
     } else {
-      await apiCreateDarkKeywordDrug(drugForm.value)
+      await apiCreateDarkKeywordDrug({
+        category_id: drugForm.value.category_id!,
+        name: drugForm.value.name,
+        display_name: drugForm.value.display_name,
+        description: drugForm.value.description,
+        priority: drugForm.value.priority
+      })
       ElMessage.success('添加成功')
     }
-    drugDialogVisible.value = false
+    showAddDrugDialog.value = false
+    editingDrug.value = false
+    resetDrugForm()
     loadData()
   } catch (error: any) {
     ElMessage.error(error.message || '操作失败')
   }
 }
 
-async function handleDeleteDrug(id: number) {
+async function deleteDrug(id: number) {
   try {
-    await ElMessageBox.confirm('确定要删除该毒品吗？删除后无法恢复！', '警告', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm('确定要删除该毒品吗？', '警告', { type: 'warning' })
     await apiDeleteDarkKeywordDrug(id)
     ElMessage.success('删除成功')
     loadData()
@@ -428,30 +579,40 @@ async function handleDeleteDrug(id: number) {
   }
 }
 
-// 关键词操作
-function handleAddKeyword(row: Drug) {
-  keywordForm.value = {
-    id: null,
-    drug_id: row.id,
-    keyword: '',
-    weight: 1,
-    is_active: true
+async function handleDrugStatusChange(row: Drug) {
+  try {
+    await apiUpdateDarkKeywordDrug(row.id, { is_active: row.is_active })
+    ElMessage.success('状态更新成功')
+  } catch (error: any) {
+    row.is_active = !row.is_active
+    ElMessage.error(error.message || '状态更新失败')
   }
-  keywordDialogVisible.value = true
 }
 
-function handleEditKeyword(row: Keyword) {
+function resetDrugForm() {
+  drugForm.value = {
+    id: null,
+    category_id: expandedCategoryId.value,
+    name: '',
+    display_name: '',
+    description: '',
+    priority: 0
+  }
+}
+
+// 关键词操作
+function editKeyword(row: Keyword) {
+  editingKeyword.value = true
   keywordForm.value = {
     id: row.id,
-    drug_id: null,
+    drug_id: expandedDrugId.value,
     keyword: row.keyword,
-    weight: row.weight,
-    is_active: row.is_active
+    weight: row.weight
   }
-  keywordDialogVisible.value = true
+  showAddKeywordDialog.value = true
 }
 
-async function handleSaveKeyword() {
+async function saveKeyword() {
   if (!keywordForm.value.keyword.trim()) {
     ElMessage.warning('请输入关键词')
     return
@@ -460,31 +621,29 @@ async function handleSaveKeyword() {
   try {
     if (keywordForm.value.id) {
       await apiUpdateDarkKeyword(keywordForm.value.id, {
-        weight: keywordForm.value.weight,
-        is_active: keywordForm.value.is_active
+        weight: keywordForm.value.weight
       })
       ElMessage.success('更新成功')
     } else {
       await apiCreateDarkKeyword({
         drug_id: keywordForm.value.drug_id!,
         keyword: keywordForm.value.keyword,
-        weight: keywordForm.value.weight,
-        is_active: keywordForm.value.is_active
+        weight: keywordForm.value.weight
       })
       ElMessage.success('添加成功')
     }
-    keywordDialogVisible.value = false
+    showAddKeywordDialog.value = false
+    editingKeyword.value = false
+    resetKeywordForm()
     loadData()
   } catch (error: any) {
     ElMessage.error(error.message || '操作失败')
   }
 }
 
-async function handleDeleteKeyword(id: number) {
+async function deleteKeyword(id: number) {
   try {
-    await ElMessageBox.confirm('确定要删除该关键词吗？', '警告', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm('确定要删除该关键词吗？', '警告', { type: 'warning' })
     await apiDeleteDarkKeywordConfig(id)
     ElMessage.success('删除成功')
     loadData()
@@ -495,20 +654,22 @@ async function handleDeleteKeyword(id: number) {
   }
 }
 
-// 切换状态
-async function handleToggleStatus(row: any) {
+async function handleKeywordStatusChange(row: Keyword) {
   try {
-    if (row.__type === 'category') {
-      await apiUpdateDarkKeywordCategory(row.id, { is_active: row.is_active })
-    } else if (row.__type === 'drug') {
-      await apiUpdateDarkKeywordDrug(row.id, { is_active: row.is_active })
-    } else if (row.__type === 'keyword') {
-      await apiUpdateDarkKeyword(row.id, { is_active: row.is_active })
-    }
+    await apiUpdateDarkKeyword(row.id, { is_active: row.is_active })
     ElMessage.success('状态更新成功')
   } catch (error: any) {
     row.is_active = !row.is_active
     ElMessage.error(error.message || '状态更新失败')
+  }
+}
+
+function resetKeywordForm() {
+  keywordForm.value = {
+    id: null,
+    drug_id: expandedDrugId.value,
+    keyword: '',
+    weight: 1
   }
 }
 
@@ -519,6 +680,40 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .dark-keyword-management {
+  height: 100%;
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .content {
+    min-height: 400px;
+  }
+
+  /* 可点击的表格行 */
+  :deep(.clickable-row) {
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  :deep(.clickable-row:hover) {
+    background-color: #f5f7fa !important;
+  }
+
+  :deep(.nested-row:hover) {
+    background-color: #ecf5ff !important;
+  }
+
+  /* 分类和毒品名称样式 */
+  .category-badge,
+  .drug-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .category-name {
     font-weight: 600;
     color: #303133;
@@ -526,27 +721,118 @@ onMounted(() => {
 
   .drug-name {
     color: #409eff;
-    padding-left: 20px;
+    font-weight: 500;
   }
 
-  .keyword-name {
-    color: #67c23a;
-    padding-left: 40px;
+  .category-title {
+    font-weight: 600;
+    color: #303133;
+    margin-left: 4px;
   }
 
-  .add-category-btn {
+  .drug-title {
+    color: #409eff;
+    font-weight: 600;
+    margin-left: 4px;
+  }
+
+  /* 操作按钮 */
+  .action-buttons {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  /* 详情面板 */
+  .detail-panel {
     margin-top: 20px;
-    text-align: center;
+    padding: 20px;
+    background: #f5f7fa;
+    border-radius: 8px;
+    border-left: 4px solid #409eff;
   }
 
-  :deep(.el-table) {
-    .el-table__row--level-1 .el-table__cell {
-      background-color: #f5f7fa;
-    }
+  .detail-panel.nested-panel {
+    margin-top: 20px;
+    background: #ecf5ff;
+    border-left-color: #67c23a;
+  }
 
-    .el-table__row--level-2 .el-table__cell {
-      background-color: #fafafa;
-    }
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #dcdfe6;
+  }
+
+  .panel-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .panel-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* 关键词面板 */
+  .keywords-panel {
+    padding: 16px 0;
+  }
+
+  .keywords-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .keyword-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #dcdfe6;
+    transition: all 0.3s ease;
+  }
+
+  .keyword-item:hover {
+    border-color: #67c23a;
+    box-shadow: 0 2px 8px rgba(103, 194, 58, 0.15);
+  }
+
+  .keyword-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .keyword-text {
+    font-size: 14px;
+    font-weight: 500;
+    color: #303133;
+    word-break: break-word;
+  }
+
+  .keyword-weight {
+    font-size: 12px;
+    color: #909399;
+  }
+
+  .keyword-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
   }
 }
 </style>

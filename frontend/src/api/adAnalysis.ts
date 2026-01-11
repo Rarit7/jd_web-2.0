@@ -77,6 +77,16 @@ export function apiGetDarkKeywordsAnalysis(params: Partial<AnalysisFilters>) {
 }
 
 /**
+ * 获取黑词词云数据（所有触发过的关键词）
+ */
+export function apiGetDarkKeywordsWordCloud(params: Partial<AnalysisFilters>) {
+  return api.get<any, ApiResponse<Array<{ name: string; value: number }>>>(
+    '/dark-keywords/word-cloud',
+    { params }
+  )
+}
+
+/**
  * 获取黑词分类列表
  */
 export function apiGetDarkKeywordCategories() {
@@ -211,15 +221,16 @@ export function apiGetTaskStatus(taskId: string) {
 }
 
 /**
- * 清除分析缓存
+ * 手动触发统计数据生成任务
  *
- * 数据处理完成后调用，强制清除缓存以确保显示最新数据
+ * 用于手动重新生成黑词、交易方式、价格和地理位置的统计数据。
+ * 系统会在后台异步处理，通常在几秒钟内完成。
  */
 export function apiClearAnalysisCache(chatId?: string) {
   return api.post<any, ApiResponse<{
     message: string
-    cleared_count: number
-    cleared_keys: string[]
+    task_id: string
+    note: string
   }>>('/cache/clear', chatId ? { chat_id: chatId } : {})
 }
 

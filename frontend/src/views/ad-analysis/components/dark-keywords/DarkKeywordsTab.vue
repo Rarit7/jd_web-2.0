@@ -83,7 +83,7 @@
               <h3>关键词云</h3>
               <DarkKeywordsWordCloud
                 :data="wordCloudData"
-                :loading="loading"
+                :loading="wordCloudLoading"
               />
             </div>
           </div>
@@ -100,6 +100,7 @@
             :page="currentPage"
             :page-size="pageSize"
             @page-change="handlePageChange"
+            @page-size-change="handlePageSizeChange"
             @delete="handleDelete"
           />
         </div>
@@ -123,6 +124,7 @@ import {
 } from '@/store/modules/adAnalysis'
 import {
   apiGetDarkKeywordsAnalysis,
+  apiGetDarkKeywordsWordCloud,
   apiDeleteDarkKeyword
 } from '@/api/adAnalysis'
 import DarkKeywordsPieChart from './DarkKeywordsPieChart.vue'
@@ -153,26 +155,8 @@ const tableData = ref<DarkKeywordData[]>([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
-
-// 词云数据（从 tableData 聚合关键词词频）
-const wordCloudData = computed(() => {
-  if (!tableData.value || tableData.value.length === 0) {
-    return []
-  }
-  // 聚合关键词词频：相同关键词的 count 相加
-  const keywordMap = new Map<string, number>()
-  tableData.value.forEach(record => {
-    const keyword = record.keyword || ''
-    const count = record.count || 0
-    if (keyword) {
-      keywordMap.set(keyword, (keywordMap.get(keyword) || 0) + count)
-    }
-  })
-  // 转换为数组并按词频降序排序
-  return Array.from(keywordMap.entries())
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
-})
+const wordCloudData = ref<Array<{ name: string; value: number }>>([])
+const wordCloudLoading = ref(false)
 
 // Computed
 const availableDrugs = computed(() => {
@@ -189,6 +173,28 @@ async function loadCategories() {
     await darkKeywordsStore.fetchCategories()
   } catch (error) {
     ElMessage.error('加载分类失败')
+  }
+}
+
+async function loadWordCloudData() {
+  wordCloudLoading.value = true
+  try {
+    const params = {
+      chat_id: analysisStore.selectedChatId || undefined,
+      tag_ids: analysisStore.selectedTagIds.length > 0 ? analysisStore.selectedTagIds : undefined,
+      keyword: searchKeyword.value || undefined,
+      category: selectedCategoryId.value || undefined,
+      drug: selectedDrugId.value || undefined,
+      days: analysisStore.days
+    }
+
+    const response = await apiGetDarkKeywordsWordCloud(params)
+    wordCloudData.value = response.payload || []
+  } catch (error) {
+    console.error('加载词云数据失败:', error)
+    wordCloudData.value = []
+  } finally {
+    wordCloudLoading.value = false
   }
 }
 
@@ -228,6 +234,7 @@ async function loadAnalysisData() {
 function handleSearch() {
   currentPage.value = 1
   loadAnalysisData()
+  loadWordCloudData()
 }
 
 function handleReset() {
@@ -237,6 +244,7 @@ function handleReset() {
   currentPage.value = 1
   darkKeywordsStore.reset()
   loadAnalysisData()
+  loadWordCloudData()
 }
 
 function handleCategoryChange() {
@@ -246,6 +254,13 @@ function handleCategoryChange() {
 
 function handlePageChange(page: number) {
   currentPage.value = page
+  loadAnalysisData()
+}
+
+function handlePageSizeChange(newPageSize: number) {
+  pageSize.value = newPageSize
+  // 页码大小改变时，子组件会自动重置到第一页
+  // 但 currentPage 已经通过 handlePageChange(1) 设置
   loadAnalysisData()
 }
 
@@ -265,6 +280,7 @@ onMounted(async () => {
   await loadCategories()
   // 加载全局统计数据
   loadAnalysisData()
+  loadWordCloudData()
 })
 
 // Watch for store changes

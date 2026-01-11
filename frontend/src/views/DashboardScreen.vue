@@ -454,33 +454,61 @@ const updateWordCloud = () => {
     return
   }
 
-  const colors = ['#4c60ff', '#27d08a', '#2db7f5', '#f50', '#fa541c', '#faad14', '#722ed1', '#eb2f96']
+  // 专业渐变色配置
+  const colors = [
+    // 蓝色系
+    '#4c60ff', '#5a7aff', '#1890ff', '#0050b3', '#0037a6',
+    // 绿色系
+    '#27d08a', '#52c41a', '#13c2c2', '#52a836', '#1890ff',
+    // 紫色系
+    '#722ed1', '#b37feb', '#9254de', '#d946ef', '#a855f7',
+    // 红色/橙色系
+    '#fa541c', '#f5222d', '#ff4d4f', '#ff7a45', '#ffa940',
+    // 黄色系
+    '#faad14', '#ffc53d', '#fadb14', '#eac855',
+    // 粉色系
+    '#eb2f96', '#f759ab', '#ff1493', '#ff69b4'
+  ]
+
+  // 计算最大值用于百分比显示
+  const maxValue = Math.max(...darkKeywordsData.value.map(item => item.value))
 
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
       show: true,
-      formatter: (params: any) => `${params.name}: ${params.value}`
+      backgroundColor: 'rgba(0, 0, 0, 0.85)',
+      borderColor: '#4c60ff',
+      textStyle: {
+        color: '#fff',
+        fontSize: 11
+      },
+      formatter: (params: any) => {
+        const percentage = ((params.value / maxValue) * 100).toFixed(0)
+        return `<strong>${params.name}</strong><br/>触发: ${params.value}次<br/>占比: ${percentage}%`
+      }
     },
     series: [{
       type: 'wordCloud',
       gridSize: 2,
-      sizeRange: [12, 32],
+      sizeRange: [20, 64],
       rotationRange: [0, 0],
       shape: 'circle',
       width: '100%',
       height: '100%',
       drawOutOfBound: false,
       textStyle: {
-        fontFamily: 'Arial, sans-serif',
-        fontWeight: 'normal',
+        fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+        fontWeight: 'bold',
         color: () => colors[Math.floor(Math.random() * colors.length)]
       },
       emphasis: {
         focus: 'self',
         textStyle: {
-          shadowBlur: 5,
-          shadowColor: '#333'
+          shadowBlur: 12,
+          shadowColor: 'rgba(76, 96, 255, 0.6)',
+          shadowOffsetX: 0,
+          shadowOffsetY: 0
         }
       },
       data: darkKeywordsData.value.map(item => ({
@@ -491,7 +519,7 @@ const updateWordCloud = () => {
   }
 
   wordCloudChart.setOption(option, true)
-  console.log('[DashboardScreen] 词云图表已更新')
+  console.log('[DashboardScreen] 词云图表已更新，共', darkKeywordsData.value.length, '个关键词')
 }
 
 /**
@@ -728,23 +756,13 @@ const updateGeoPieChart = () => {
       formatter: '{b}: {c} ({d}%)'
     },
     legend: {
-      orient: 'vertical',
-      left: 'right',
-      top: 'center',
-      itemWidth: 10,
-      itemHeight: 10,
-      itemGap: 8,
-      data: geoHeatmapData.value.map(item => item.name),
-      textStyle: {
-        color: 'rgba(255,255,255,.8)',
-        fontSize: '11'
-      }
+      show: false
     },
     series: [{
       name: '地区分布',
       type: 'pie',
       radius: ['45%', '75%'],  // 环形图：内径45%，外径75%
-      center: ['40%', '50%'],
+      center: ['50%', '50%'],
       // 移除 roseType，改为普通环形图
       itemStyle: {
         borderRadius: 4,
@@ -1498,28 +1516,54 @@ const initCharts = async () => {
     if (wordCloud.value) {
       try {
         wordCloudChart = echarts.init(wordCloud.value)
-        const colors = ['#4c60ff', '#27d08a', '#2db7f5', '#f50', '#fa541c', '#faad14', '#722ed1', '#eb2f96']
-        
+        // 专业渐变色配置
+        const colors = [
+          // 蓝色系
+          '#4c60ff', '#5a7aff', '#1890ff', '#0050b3', '#0037a6',
+          // 绿色系
+          '#27d08a', '#52c41a', '#13c2c2', '#52a836', '#1890ff',
+          // 紫色系
+          '#722ed1', '#b37feb', '#9254de', '#d946ef', '#a855f7',
+          // 红色/橙色系
+          '#fa541c', '#f5222d', '#ff4d4f', '#ff7a45', '#ffa940',
+          // 黄色系
+          '#faad14', '#ffc53d', '#fadb14', '#eac855',
+          // 粉色系
+          '#eb2f96', '#f759ab', '#ff1493', '#ff69b4'
+        ]
+
+        // 计算最大值用于百分比显示
+        const maxValue = wordCloudData.value.data && wordCloudData.value.data.length > 0
+          ? Math.max(...wordCloudData.value.data.map(item => item.value))
+          : 1
+
         const wordCloudOption = {
           backgroundColor: 'transparent',
           tooltip: {
             show: true,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            borderColor: '#4c60ff',
+            textStyle: {
+              color: '#fff',
+              fontSize: 11
+            },
             formatter: function(params: any) {
-              return `${params.name}: ${params.value}`
+              const percentage = ((params.value / maxValue) * 100).toFixed(0)
+              return `<strong>${params.name}</strong><br/>触发: ${params.value}次<br/>占比: ${percentage}%`
             }
           },
           series: [{
             type: 'wordCloud',
             gridSize: 2,
-            sizeRange: [12, 32],
+            sizeRange: [20, 64],
             rotationRange: [0, 0],
             shape: 'circle',
             width: '100%',
             height: '100%',
             drawOutOfBound: false,
             textStyle: {
-              fontFamily: 'Arial, sans-serif',
-              fontWeight: 'normal',
+              fontFamily: 'Arial, "Microsoft YaHei", sans-serif',
+              fontWeight: 'bold',
               color: function (params: any) {
                 return colors[Math.floor(Math.random() * colors.length)]
               }
@@ -1527,8 +1571,10 @@ const initCharts = async () => {
             emphasis: {
               focus: 'self',
               textStyle: {
-                shadowBlur: 5,
-                shadowColor: '#333'
+                shadowBlur: 12,
+                shadowColor: 'rgba(76, 96, 255, 0.6)',
+                shadowOffsetX: 0,
+                shadowOffsetY: 0
               }
             },
             data: wordCloudData.value.data.map(item => ({
@@ -1537,9 +1583,9 @@ const initCharts = async () => {
             }))
           }]
         }
-        
+
         wordCloudChart.setOption(wordCloudOption)
-        console.log('词云初始化成功')
+        console.log('词云初始化成功，共', wordCloudData.value.data.length, '个关键词')
       } catch (error) {
         console.error('词云初始化失败:', error)
       }
@@ -1776,26 +1822,16 @@ const initCharts = async () => {
         color: ['#4c60ff', '#27d08a', '#ff6b6b', '#ffa726', '#ab47bc', '#26c6da', '#66bb6a', '#ffca28'],
         tooltip: {
           trigger: 'item',
-          formatter: '{a} <br/>{b} : {c} ({d}%)'
+          formatter: '{b}: {c} ({d}%)'
         },
         legend: {
-          orient: 'vertical',
-          left: 'right',
-          top: 'center',
-          itemWidth: 10,
-          itemHeight: 10,
-          itemGap: 8,
-          data: echart6Data.value.data.map(item => item.name),
-          textStyle: {
-            color: 'rgba(255,255,255,.8)',
-            fontSize: '11'
-          }
+          show: false
         },
         series: [{
           name: '监控数据',
           type: 'pie',
           radius: ['30%', '80%'],
-          center: ['40%', '50%'],
+          center: ['50%', '50%'],
           roseType: 'radius',
           itemStyle: {
             borderRadius: 5,

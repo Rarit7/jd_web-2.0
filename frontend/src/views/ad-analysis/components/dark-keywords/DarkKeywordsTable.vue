@@ -64,7 +64,7 @@
         :total="total"
         layout="total, sizes, prev, pager, next, jumper"
         @current-page-change="handlePageChange"
-        @page-size-change="handlePageChange"
+        @page-size-change="handlePageSizeChange"
       />
     </div>
   </div>
@@ -84,6 +84,7 @@ interface Props {
 
 interface Emits {
   'page-change': [page: number]
+  'page-size-change': [pageSize: number]
   'delete': [id: number]
 }
 
@@ -103,6 +104,14 @@ watch(() => props.pageSize, (newSize) => {
 
 function handlePageChange() {
   emit('page-change', currentPageLocal.value)
+}
+
+function handlePageSizeChange() {
+  // 改变页码大小时，重置到第一页
+  currentPageLocal.value = 1
+  // 同时发出页码和页码大小改变的事件
+  emit('page-change', 1)
+  emit('page-size-change', pageSizeLocal.value)
 }
 
 function handleDelete(id: number) {

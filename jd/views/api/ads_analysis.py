@@ -11,6 +11,7 @@ from flask import request
 from jd import db
 from jd.views.api import api
 from jd.helpers.response import api_response
+from jd.helpers.geo_helper import normalize_province_name
 from jd.services.stats_aggregation_service import StatsAggregationService
 # CacheService 已不再使用（系统迁移到 MySQL 统计表）
 # from jd.services.cache_service import CacheService
@@ -532,15 +533,18 @@ def get_geo_heatmap():
             use_cache=True
         )
 
-        # 筛选特定省份
+        # 筛选特定省份（支持短名称和标准名称）
         if province:
+            # 规范化输入的省份名称以便匹配
+            normalized_province = normalize_province_name(province)
+
             heatmap_data['provinces'] = [
                 p for p in heatmap_data['provinces']
-                if p['name'] == province
+                if p['name'] == normalized_province
             ]
 
             # 如果是山东省，也返回城市级别数据
-            if province == '山东省':
+            if normalized_province == '山东省':
                 pass  # shandong_cities 已在查询中处理
             else:
                 heatmap_data['shandong_cities'] = []

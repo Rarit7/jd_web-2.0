@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import func, text
 
 from jd import db
+from jd.helpers.geo_helper import normalize_province_name, normalize_provinces_list, normalize_cities_with_provinces
 from jd.models.ad_tracking_price import AdTrackingPrice
 from jd.models.ad_tracking_transaction_method import AdTrackingTransactionMethod
 from jd.models.ad_tracking_geo_location import AdTrackingGeoLocation
@@ -383,13 +384,22 @@ class StatsAggregationService:
                 if city and prov
             ]
 
+            # 规范化省份名称为地图标准格式（便于前端ECharts地图绘制）
+            normalized_provinces = normalize_provinces_list(
+                sorted(provinces, key=lambda x: x['value'], reverse=True)
+            )
+            normalized_shandong_cities = normalize_cities_with_provinces(
+                sorted(shandong_cities, key=lambda x: x['value'], reverse=True)
+            )
+            normalized_all_cities = normalize_cities_with_provinces(all_cities)
+
             result = {
-                'provinces': sorted(provinces, key=lambda x: x['value'], reverse=True),
-                'shandong_cities': sorted(shandong_cities, key=lambda x: x['value'], reverse=True),
-                'all_cities': all_cities  # 已按 count DESC 排序，TOP 50
+                'provinces': normalized_provinces,
+                'shandong_cities': normalized_shandong_cities,
+                'all_cities': normalized_all_cities
             }
 
-            logger.info(f"地理热力图查询完成: {len(provinces)} 省份")
+            logger.info(f"地理热力图查询完成: {len(normalized_provinces)} 省份")
             return result
         except Exception as e:
             logger.error(f"地理热力图查询失败: {e}")
